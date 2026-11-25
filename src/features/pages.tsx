@@ -212,7 +212,7 @@ export function capabilities() {
       try { return document.createElement('canvas').toDataURL('image/webp').startsWith('data:image/webp'); }
       catch { return false; }
     })(),
-    'MP4 Encode': videoFormats().some(type => type.startsWith('video/mp4')),
+    'MP4 Encode': (typeof WebAssembly !== 'undefined' && typeof Worker !== 'undefined') || videoFormats().some(type => type.startsWith('video/mp4')),
     'WebM Encode': videoFormats().some(type => type.startsWith('video/webm')),
     'Web Audio': typeof OfflineAudioContext !== 'undefined',
     'MediaRecorder': audioFormats().length > 0,
