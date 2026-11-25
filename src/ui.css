@@ -341,18 +341,27 @@ progress { height: 13px; width: 100%; accent-color: #6a923b; }
   .tool-rail button { justify-self: stretch; width: 100%; height: 49px; }
   .inspector { grid-row: 4; border-left: 0; border-top: 1px solid var(--stone); padding-bottom: env(safe-area-inset-bottom); overflow: visible; }
   .inspector-content { max-width: 540px; }
-  .studio-header { position: sticky; top: 0; z-index: 4; gap: 3px; padding-top: max(6px, env(safe-area-inset-top)); min-height: 58px; }
-  .studio-header .projects-icon { display: none; }
-  .studio-actions { gap: 2px; }
-  .studio-actions .icon-button { min-width: 42px; width: 42px; }
+  .studio-header { position: sticky; top: 0; z-index: 4; gap: 4px; padding-top: max(6px, env(safe-area-inset-top)); min-height: 58px; }
+  .studio-actions { gap: 3px; }
+  .studio-actions .icon-button, .projects-icon { min-width: 40px; width: 40px; }
   .studio-actions .studio-diagnostic, .studio-actions .studio-lang { display: none; }
   .studio-actions .export-button { padding-inline: 10px; gap: 4px; }
-  .project-heading input { font-size: .89rem; }
+  .project-heading input { font-size: 16px; }
   .save-state span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .offline-label { font-size: 0; }
+  .workspace-preview > header { flex-wrap: wrap; gap: 6px 8px; padding: 6px 12px; }
+  .whatsapp-sticker-frame { width: min(100%, 340px, 48dvh); min-width: min(220px, 100%); }
+  input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]), textarea, select { font-size: 16px; }
+}
+@media (max-width: 600px) {
+  .project-row { grid-template-columns: auto minmax(0, 1fr); gap: 10px; }
 }
 @media (max-width: 470px) {
   .wrap { width: calc(100% - 24px); }
+  .studio-brand { width: 36px; flex: 0 0 36px; height: 40px; }
+  .studio-actions .icon-button, .projects-icon { min-width: 36px; width: 36px; }
+  .studio-actions .export-button { padding-inline: 9px; font-size: .82rem; }
+  .auth-card { padding: 20px 16px; border-radius: 16px; }
   .brand { gap: 7px; font-size: 1.08rem; }
   .nav-actions { gap: 4px; }
   .language { padding: 0 8px; }

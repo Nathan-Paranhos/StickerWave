@@ -91,7 +91,9 @@ export async function hash(blob: Blob) {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 export async function decodeAudio(blob: Blob) {
-  const context = new OfflineAudioContext(2, 1, 48000);
+  let context: OfflineAudioContext;
+  try { context = new OfflineAudioContext(2, 1, 48000); }
+  catch { context = new OfflineAudioContext(2, 1, 44100); }
   try { return await context.decodeAudioData(await blob.arrayBuffer()); }
   catch { throw new Error('1004'); }
 }
@@ -117,6 +119,8 @@ export async function openVisual(blob: Blob, mime: string, signal?: AbortSignal,
   if (element instanceof HTMLVideoElement) {
     element.muted = true;
     element.playsInline = true;
+    element.setAttribute('playsinline', '');
+    element.setAttribute('webkit-playsinline', '');
     element.preload = 'auto';
   }
   try {

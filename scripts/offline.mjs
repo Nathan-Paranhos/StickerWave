@@ -32,7 +32,7 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const request = event.request;
   const path = new URL(request.url);
-  if (request.method !== 'GET' || path.origin !== self.location.origin || path.pathname === '/download') return;
+  if (request.method !== 'GET' || path.origin !== self.location.origin || path.pathname === '/download' || path.pathname.startsWith('/api/')) return;
   if (request.mode === 'navigate') {
     event.respondWith(fetch(request).catch(async () => (await caches.open(shell)).match('/index.html')));
     return;

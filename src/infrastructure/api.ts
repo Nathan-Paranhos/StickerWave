@@ -1,4 +1,5 @@
 import type { Project } from '../core/project';
+import { clearVaultSession, readVaultSession, vaultLogin, vaultRegister } from './vault';
 
 export type AuthUser = {
   id: string;
@@ -7,25 +8,56 @@ export type AuthUser = {
   createdAt: string;
 };
 
-async function apiJson<T>(url: string, init: RequestInit = {}): Promise<{ status: number; data: T | null }> {
-  const response = await fetch(url, {
-    credentials: 'same-origin',
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init.headers ?? {}),
-    },
-  });
-  let data: T | null = null;
+type JsonFetchResult<T> = {
+  status: number;
+  data: T | null;
+  isJson: boolean;
+  networkError: boolean;
+};
+
+async function apiJson<T>(url: string, init: RequestInit = {}): Promise<JsonFetchResult<T>> {
   try {
-    data = (await response.json()) as T;
+    const response = await fetch(url, {
+      credentials: 'same-origin',
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init.headers ?? {}),
+      },
+    });
+    const contentType = response.headers.get('content-type') ?? '';
+    const isJson = contentType.toLowerCase().includes('application/json');
+    let data: T | null = null;
+    if (isJson) {
+      try { data = (await response.json()) as T; } catch { data = null; }
+    }
+    return { status: response.status, data, isJson: isJson && data !== null, networkError: false };
   } catch {
-    data = null;
+    return { status: 0, data: null, isJson: false, networkError: true };
   }
-  return { status: response.status, data };
+}
+
+function backendUnavailable<T>(res: JsonFetchResult<T>): boolean {
+  return res.networkError || !res.isJson || res.status === 405 || res.status === 501 || (res.status === 404 && !res.isJson);
 }
 
 const CACHED_USER_KEY = 'stickerwave:cachedUser';
+const AUTH_MODE_KEY = 'stickerwave:authMode';
+
+function setAuthMode(mode: 'remote' | 'local' | null) {
+  try {
+    if (mode) localStorage.setItem(AUTH_MODE_KEY, mode);
+    else localStorage.removeItem(AUTH_MODE_KEY);
+  } catch { /* storage optional */ }
+}
+
+export function isRemoteAccountMode(): boolean {
+  try {
+    return localStorage.getItem(AUTH_MODE_KEY) !== 'local';
+  } catch {
+    return true;
+  }
+}
 
 function readCachedUser(): AuthUser | null {
   try {
@@ -46,111 +78,134 @@ function writeCachedUser(user: AuthUser | null) {
 }
 
 export async function fetchCurrentUser(): Promise<AuthUser | null> {
-  try {
-    const { status, data } = await apiJson<{ user: AuthUser | null }>('/api/auth/me', { method: 'GET' });
-    if (status === 200) {
-      const current = data?.user ?? null;
+  if (!isRemoteAccountMode()) {
+    const local = readVaultSession();
+    if (local) return local;
+  }
+  const res = await apiJson<{ user: AuthUser | null }>('/api/auth/me', { method: 'GET' });
+  if (!backendUnavailable(res)) {
+    if (res.status === 200) {
+      const current = res.data?.user ?? null;
+      if (current) setAuthMode('remote');
       writeCachedUser(current);
       return current;
     }
     writeCachedUser(null);
     return null;
-  } catch {
-    return navigator.onLine === false ? readCachedUser() : null;
   }
+  const vaultUser = readVaultSession();
+  if (vaultUser) {
+    setAuthMode('local');
+    return vaultUser;
+  }
+  return navigator.onLine === false ? readCachedUser() : null;
 }
 
 export async function registerAccount(input: { name: string; email: string; password: string; confirmPassword?: string }): Promise<AuthUser> {
-  let res;
-  try {
-    res = await apiJson<{ user?: AuthUser; code?: string }>('/api/auth/register', {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
-  } catch {
+  if (input.confirmPassword !== undefined && input.password !== input.confirmPassword) {
+    throw new Error('7005');
+  }
+  const res = await apiJson<{ user?: AuthUser; code?: string }>('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  if (!backendUnavailable(res)) {
+    if (res.status === 201 && res.data?.user) {
+      setAuthMode('remote');
+      writeCachedUser(res.data.user);
+      return res.data.user;
+    }
+    if (res.status === 409) throw new Error('7003');
+    if (res.status === 400) throw new Error(res.data?.code === '7005' ? '7005' : '7002');
     throw new Error('7004');
   }
-  if (res.status === 201 && res.data?.user) {
-    writeCachedUser(res.data.user);
-    return res.data.user;
-  }
-  if (res.status === 409) throw new Error('7003');
-  if (res.status === 400) throw new Error('7002');
-  throw new Error('7004');
+  const localUser = await vaultRegister(input);
+  setAuthMode('local');
+  writeCachedUser(localUser);
+  return localUser;
 }
 
 export async function loginAccount(input: { email: string; password: string }): Promise<AuthUser> {
-  let res;
-  try {
-    res = await apiJson<{ user?: AuthUser; code?: string }>('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
-  } catch {
+  const res = await apiJson<{ user?: AuthUser; code?: string }>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  if (!backendUnavailable(res)) {
+    if (res.status === 200 && res.data?.user) {
+      setAuthMode('remote');
+      writeCachedUser(res.data.user);
+      return res.data.user;
+    }
+    if (res.status === 401) throw new Error('7001');
+    if (res.status === 400) throw new Error('7002');
     throw new Error('7004');
   }
-  if (res.status === 200 && res.data?.user) {
-    writeCachedUser(res.data.user);
-    return res.data.user;
-  }
-  if (res.status === 401) throw new Error('7001');
-  if (res.status === 400) throw new Error('7002');
-  throw new Error('7004');
+  const localUser = await vaultLogin(input);
+  setAuthMode('local');
+  writeCachedUser(localUser);
+  return localUser;
 }
 
 export async function logoutAccount(): Promise<void> {
+  const wasRemote = isRemoteAccountMode();
   writeCachedUser(null);
-  try {
-    await apiJson('/api/auth/logout', { method: 'POST', body: '{}' });
-  } catch {
-    /* ignore network error when clearing client session */
+  clearVaultSession();
+  setAuthMode(null);
+  if (wasRemote) {
+    await apiJson('/api/auth/logout', { method: 'POST', body: '{}' }).catch(() => undefined);
   }
 }
 
 export async function apiListProjects(): Promise<Project[]> {
-  const { status, data } = await apiJson<{ projects?: Project[] }>('/api/projects', { method: 'GET' });
-  if (status === 401) throw new Error('7001');
-  if (status !== 200 || !data?.projects) throw new Error('4002');
-  return data.projects;
+  const res = await apiJson<{ projects?: Project[] }>('/api/projects', { method: 'GET' });
+  if (backendUnavailable(res)) { setAuthMode('local'); throw new Error('7004'); }
+  if (res.status === 401) throw new Error('7001');
+  if (res.status !== 200 || !res.data?.projects) throw new Error('4002');
+  return res.data.projects;
 }
 
 export async function apiLoadProject(id: string): Promise<Project | null> {
-  const { status, data } = await apiJson<{ project?: Project }>(`/api/projects/${id}`, { method: 'GET' });
-  if (status === 404) return null;
-  if (status === 401) throw new Error('7001');
-  if (status !== 200 || !data?.project) throw new Error('4002');
-  return data.project;
+  const res = await apiJson<{ project?: Project }>(`/api/projects/${id}`, { method: 'GET' });
+  if (backendUnavailable(res)) { setAuthMode('local'); throw new Error('7004'); }
+  if (res.status === 404) return null;
+  if (res.status === 401) throw new Error('7001');
+  if (res.status !== 200 || !res.data?.project) throw new Error('4002');
+  return res.data.project;
 }
 
 export async function apiSaveProject(project: Project, expectedRevision: number | null): Promise<Project> {
-  const { status, data } = await apiJson<{ project?: Project; code?: string }>(`/api/projects/${project.id}`, {
+  const res = await apiJson<{ project?: Project; code?: string }>(`/api/projects/${project.id}`, {
     method: 'PUT',
     body: JSON.stringify({ project, expectedRevision }),
   });
-  if (status === 409) throw new Error('4003');
-  if (status === 401) throw new Error('7001');
-  if (status !== 200 || !data?.project) throw new Error(data?.code ?? '4002');
-  return data.project;
+  if (backendUnavailable(res)) { setAuthMode('local'); throw new Error('7004'); }
+  if (res.status === 409) throw new Error('4003');
+  if (res.status === 401) throw new Error('7001');
+  if (res.status !== 200 || !res.data?.project) throw new Error(res.data?.code ?? '4002');
+  return res.data.project;
 }
 
 export async function apiDeleteProject(id?: string): Promise<void> {
-  const { status } = await apiJson(id ? `/api/projects/${id}` : '/api/projects', { method: 'DELETE' });
-  if (status === 401) throw new Error('7001');
-  if (status >= 400) throw new Error('4001');
+  const res = await apiJson(id ? `/api/projects/${id}` : '/api/projects', { method: 'DELETE' });
+  if (backendUnavailable(res)) { setAuthMode('local'); throw new Error('7004'); }
+  if (res.status === 401) throw new Error('7001');
+  if (res.status >= 400) throw new Error('4001');
 }
 
 export async function apiListFavorites(): Promise<string[]> {
-  const { status, data } = await apiJson<{ favorites?: string[] }>('/api/favorites', { method: 'GET' });
-  if (status === 401) throw new Error('7001');
-  if (status !== 200 || !data?.favorites) throw new Error('4001');
-  return data.favorites;
+  const res = await apiJson<{ favorites?: string[] }>('/api/favorites', { method: 'GET' });
+  if (backendUnavailable(res)) { setAuthMode('local'); throw new Error('7004'); }
+  if (res.status === 401) throw new Error('7001');
+  if (res.status !== 200 || !res.data?.favorites) throw new Error('4001');
+  return res.data.favorites;
 }
 
 export async function apiSetFavorite(soundId: string, favorite: boolean): Promise<void> {
-  const { status } = await apiJson(`/api/favorites/${encodeURIComponent(soundId)}`, {
+  const res = await apiJson(`/api/favorites/${encodeURIComponent(soundId)}`, {
     method: 'PUT',
     body: JSON.stringify({ favorite }),
   });
-  if (status === 401) throw new Error('7001');
-  if (status >= 400) throw new Error('4001');
+  if (backendUnavailable(res)) { setAuthMode('local'); throw new Error('7004'); }
+  if (res.status === 401) throw new Error('7001');
+  if (res.status >= 400) throw new Error('4001');
 }

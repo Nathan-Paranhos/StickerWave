@@ -381,7 +381,7 @@ function Editor({ session, query }: { session: Session; query: string }) {
         <button className="icon-button" title={copy.redo} aria-label={copy.redo} onClick={() => draft.undo(true)} disabled={draft.history.redo === 0 || Boolean(job)}><Redo2 size={20} /></button>
         <button className="icon-button studio-diagnostic" title={copy.diagnostic} aria-label={copy.diagnostic} onClick={() => setDiagnostics(true)}><Wrench size={17} /></button>
         <button className="language studio-lang" aria-label={`${locale.toUpperCase()} · ${copy.language}`} onClick={toggleLanguage}><Globe2 size={16} />{locale === 'pt' ? 'PT' : 'EN'}</button>
-        <button className="icon-button studio-diagnostic" title={copy.signOut} aria-label={copy.signOut} onClick={() => void draft.drain().then(() => logout())}><LogOut size={17} /></button>
+        <button className="icon-button studio-logout" title={copy.signOut} aria-label={copy.signOut} onClick={() => void draft.drain().then(() => logout())}><LogOut size={17} /></button>
         <button className="button button-green export-button" onClick={() => { preview.halt(); setExporting(true); }} disabled={!haveComposition || Boolean(job)}><Download size={18} />{copy.export}</button>
       </div>
     </header>

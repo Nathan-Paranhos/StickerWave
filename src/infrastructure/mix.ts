@@ -22,7 +22,8 @@ function addTrack(context: OfflineAudioContext, buffer: AudioBuffer, style: Soun
   source.buffer = buffer;
   source.playbackRate.value = style.rate;
   const gain = context.createGain();
-  const peak = rangePeak(buffer, Math.floor(start * sampleRate), Math.min(buffer.length, Math.ceil((start + sourceLength) * sampleRate)));
+  const rate = buffer.sampleRate || sampleRate;
+  const peak = rangePeak(buffer, Math.floor(start * rate), Math.min(buffer.length, Math.ceil((start + sourceLength) * rate)));
   const volume = style.gain * (style.normalize && peak ? .9 / peak : 1);
   const scale = Math.min(1, duration * 1000 / (style.fadeIn + style.fadeOut || 1)) / 1000;
   const fadeIn = scale * style.fadeIn;
@@ -50,7 +51,12 @@ export async function mixAudio(project: Project, assets: ReadonlyMap<string, Sto
   }
   const channels = Math.max(1, ...[...sources.values()].map(buffer => buffer.numberOfChannels));
   const duration = Math.max(1, ...tracks.map(track => trackDuration(track.style)));
-  const context = new OfflineAudioContext(channels, Math.round(duration * sampleRate / 1000), sampleRate);
+  let context: OfflineAudioContext;
+  try { context = new OfflineAudioContext(channels, Math.round(duration * sampleRate / 1000), sampleRate); }
+  catch {
+    const fallbackRate = sources.values().next().value?.sampleRate || 44_100;
+    context = new OfflineAudioContext(channels, Math.max(1, Math.round(duration * fallbackRate / 1000)), fallbackRate);
+  }
   for (const track of tracks) addTrack(context, sources.get(track.asset)!, track.style);
   const buffer = await context.startRendering();
   signal.throwIfAborted();

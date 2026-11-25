@@ -6,8 +6,13 @@ import { Composition } from './composition';
 import { mixAudio } from './mix';
 import { closeVisual, identify, openVisual, videoFormats } from './media';
 
-export type ExportFormat = 'webp' | 'animated-webp' | 'wav' | 'opus' | 'video' | 'backup';
+export type ExportFormat = 'webp' | 'animated-webp' | 'whatsapp-image' | 'wav' | 'opus' | 'video' | 'backup';
 export type ExportResult = { blob: Blob; extension: string };
+
+function openAudioContext() {
+  try { return new AudioContext({ sampleRate: 48_000 }); }
+  catch { return new AudioContext(); }
+}
 
 function newCanvas() {
   const canvas = document.createElement('canvas');
@@ -73,13 +78,10 @@ async function soundExport(project: Project, assets: ReadonlyMap<string, StoredA
 }
 
 async function attemptVideoExport(project: Project, assets: ReadonlyMap<string, StoredAsset>,
-  duration: number, signal: AbortSignal, progress: (ratio: number) => void, mimeType: string): Promise<ExportResult> {
+  duration: number, signal: AbortSignal, progress: (ratio: number) => void, mimeType: string,
+  context: AudioContext, resumed: Promise<void>): Promise<ExportResult> {
   const canvas = newCanvas();
   const compositor = new Composition(signal);
-  const context = new AudioContext({ sampleRate: 48000 });
-  // Resume directly from the export gesture to satisfy mobile audio policies.
-  const resumed = context.resume();
-  void resumed.catch(() => undefined);
   const stream = canvas.captureStream(24);
   const videoTrack = stream.getVideoTracks()[0] as (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
   const destination = context.createMediaStreamDestination();
@@ -175,9 +177,9 @@ async function attemptVideoExport(project: Project, assets: ReadonlyMap<string, 
   } finally {
     if (recorder && recorder.state !== 'inactive') recorder.stop();
     try { source?.stop(); } catch { /* already ended */ }
+    source?.disconnect();
     stream.getTracks().forEach(track => track.stop());
     compositor.close();
-    await context.close().catch(() => undefined);
   }
 }
 
@@ -185,17 +187,25 @@ async function videoExport(project: Project, assets: ReadonlyMap<string, StoredA
   duration: number, signal: AbortSignal, progress: (ratio: number) => void, preferred?: string): Promise<ExportResult> {
   const formats = videoFormats().filter(type => !preferred || type.startsWith(preferred));
   if (!formats.length) throw new Error('3001');
+  // Create and unlock AudioContext once synchronously from the user gesture before trying fallback codecs.
+  const context = openAudioContext();
+  const resumed = context.resume();
+  void resumed.catch(() => undefined);
   let lastError: unknown = new Error('3001');
-  for (const mimeType of formats) {
-    signal.throwIfAborted();
-    try {
-      return await attemptVideoExport(project, assets, duration, signal, progress, mimeType);
-    } catch (error) {
-      if (signal.aborted || (error instanceof Error && (error.message === '3002' || error.message === '3005'))) throw error;
-      lastError = error;
+  try {
+    for (const mimeType of formats) {
+      signal.throwIfAborted();
+      try {
+        return await attemptVideoExport(project, assets, duration, signal, progress, mimeType, context, resumed);
+      } catch (error) {
+        if (signal.aborted || (error instanceof Error && (error.message === '3002' || error.message === '3005'))) throw error;
+        lastError = error;
+      }
     }
+    throw lastError;
+  } finally {
+    await context.close().catch(() => undefined);
   }
-  throw lastError;
 }
 
 export async function imagePngExport(project: Project, assets: ReadonlyMap<string, StoredAsset>, signal: AbortSignal, frameMs = 0): Promise<Blob> {
@@ -214,6 +224,15 @@ export async function imagePngExport(project: Project, assets: ReadonlyMap<strin
 export async function renderExport(format: ExportFormat, project: Project, assets: ReadonlyMap<string, StoredAsset>,
   signal: AbortSignal, progress: (ratio: number) => void, frame: number, videoContainer?: string): Promise<ExportResult> {
   if (format === 'webp') return { blob: await imageExport(project, assets, signal, frame), extension: 'webp' };
+  if (format === 'whatsapp-image') {
+    try { return { blob: await imageExport(project, assets, signal, frame), extension: 'webp' }; }
+    catch (error) {
+      if (error instanceof Error && error.message === '3001') {
+        return { blob: await imagePngExport(project, assets, signal, frame), extension: 'png' };
+      }
+      throw error;
+    }
+  }
   if (format === 'animated-webp') return { blob: await animatedExport(project, assets, signal, progress), extension: 'webp' };
   if (format === 'wav') return { blob: await soundExport(project, assets, signal), extension: 'wav' };
   if (format === 'opus') {

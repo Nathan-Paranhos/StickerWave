@@ -3,6 +3,7 @@ import {
   buildSessionCookie, hashPassword, hashSessionToken, newSessionToken,
   parseCookies, publicUser, SESSION_COOKIE, SESSION_TTL_SECONDS, verifyPassword,
 } from './auth.mjs';
+import { createPrismaStore, isDataStore } from './stores.mjs';
 
 const MAX_BODY_BYTES = 384 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -37,17 +38,27 @@ const projectSaveSchema = z.object({
 
 const favoriteSchema = z.object({ favorite: z.boolean() });
 
-function sendJson(response, status, body, headers = {}) {
-  const payload = JSON.stringify(body);
-  response.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(payload),
-    'Cache-Control': 'no-store',
-    ...headers,
-  }).end(payload);
+function readHeader(headers, name) {
+  if (!headers) return '';
+  if (typeof headers.get === 'function') return headers.get(name) ?? '';
+  const value = headers[name] ?? headers[name.toLowerCase()];
+  return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
 }
 
-async function readJson(request) {
+function jsonResponse(status, body, headers = {}) {
+  const payload = JSON.stringify(body);
+  return {
+    status,
+    payload,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      ...headers,
+    },
+  };
+}
+
+async function readNodeBody(request) {
   const chunks = [];
   let total = 0;
   for await (const chunk of request) {
@@ -55,251 +66,219 @@ async function readJson(request) {
     if (total > MAX_BODY_BYTES) throw Object.assign(new Error('Payload too large'), { status: 413 });
     chunks.push(chunk);
   }
-  if (!chunks.length) return {};
+  return chunks.length ? Buffer.concat(chunks).toString('utf8') : '';
+}
+
+function parseJsonText(raw) {
+  if (!raw.trim()) return {};
+  if (Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) {
+    throw Object.assign(new Error('Payload too large'), { status: 413 });
+  }
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    return JSON.parse(raw);
   } catch {
     throw Object.assign(new Error('Invalid JSON'), { status: 400 });
   }
 }
 
-function isSecureRequest(request) {
-  const proto = request.headers['x-forwarded-proto'];
-  return typeof proto === 'string' && proto.split(',')[0].trim() === 'https';
+function isSecureRequest(headers, requestUrl) {
+  const proto = readHeader(headers, 'x-forwarded-proto');
+  if (proto.split(',')[0].trim() === 'https') return true;
+  return typeof requestUrl === 'string' && requestUrl.startsWith('https://');
 }
 
-function checkSameOrigin(request) {
-  const origin = request.headers.origin;
+function checkSameOrigin(headers, requestUrl) {
+  const origin = readHeader(headers, 'origin');
   if (!origin) return true;
+  let urlHost = '';
+  if (typeof requestUrl === 'string' && /^https?:\/\//i.test(requestUrl)) {
+    try { urlHost = new URL(requestUrl).host; } catch { /* ignore */ }
+  }
+  const host = readHeader(headers, 'x-forwarded-host') || readHeader(headers, 'host') || urlHost;
+  if (!host) return false;
   try {
-    return new URL(origin).host === request.headers.host;
+    return new URL(origin).host === host.split(',')[0].trim();
   } catch {
     return false;
   }
 }
 
-async function resolveSession(prisma, request) {
-  const cookies = parseCookies(request.headers.cookie);
-  const token = cookies[SESSION_COOKIE];
-  if (!token) return null;
-  const tokenHash = hashSessionToken(token);
-  const session = await prisma.session.findUnique({
-    where: { tokenHash },
-    include: { user: true },
-  });
-  if (!session) return null;
-  if (session.expiresAt.getTime() <= Date.now()) {
-    await prisma.session.delete({ where: { id: session.id } }).catch(() => undefined);
-    return null;
+function normalizeApiPath(pathname) {
+  if (pathname.startsWith('/.netlify/functions/api')) {
+    const rest = pathname.slice('/.netlify/functions/api'.length);
+    if (!rest || rest === '/') return '/';
+    return rest === '/api' || rest.startsWith('/api/') ? rest : `/api${rest.startsWith('/') ? rest : `/${rest}`}`;
   }
-  return { session, user: session.user, tokenHash };
+  return pathname || '/';
 }
 
-async function createSessionForUser(prisma, userId, secure) {
+async function createSessionCookie(store, userId, secure) {
   const token = newSessionToken();
   const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000);
-  await prisma.session.create({
-    data: { tokenHash: hashSessionToken(token), userId, expiresAt },
-  });
+  await store.createSession({ tokenHash: hashSessionToken(token), userId, expiresAt });
   return buildSessionCookie(token, { secure });
 }
 
-export async function handleApiRequest(request, response, pathname, prisma) {
-  const method = request.method ?? 'GET';
-  const secure = isSecureRequest(request);
+export async function handleApiCore({ method = 'GET', pathname, headers, bodyText = '', requestUrl, store }) {
+  const normalizedPath = normalizeApiPath(pathname);
+  const secure = isSecureRequest(headers, requestUrl);
 
-  if (method !== 'GET' && method !== 'HEAD' && !checkSameOrigin(request)) {
-    sendJson(response, 403, { error: 'Forbidden origin' });
-    return;
+  if (method !== 'GET' && method !== 'HEAD' && !checkSameOrigin(headers, requestUrl)) {
+    return jsonResponse(403, { error: 'Forbidden origin' });
   }
 
   try {
-    if (pathname === '/api/health' && method === 'GET') {
-      await prisma.$queryRaw`SELECT 1`;
-      sendJson(response, 200, { ok: true });
-      return;
+    if (normalizedPath === '/api/health' && method === 'GET') {
+      await store.ping();
+      return jsonResponse(200, { ok: true });
     }
 
-    if (pathname === '/api/auth/me' && method === 'GET') {
-      const auth = await resolveSession(prisma, request);
-      sendJson(response, 200, { user: auth ? publicUser(auth.user) : null });
-      return;
+    const cookies = parseCookies(readHeader(headers, 'cookie'));
+    const token = cookies[SESSION_COOKIE];
+
+    if (normalizedPath === '/api/auth/me' && method === 'GET') {
+      const auth = token ? await store.findSession(hashSessionToken(token)) : null;
+      return jsonResponse(200, { user: auth ? publicUser(auth.user) : null });
     }
 
-    if (pathname === '/api/auth/register' && method === 'POST') {
-      const parsed = registerSchema.safeParse(await readJson(request));
+    if (normalizedPath === '/api/auth/register' && method === 'POST') {
+      const parsed = registerSchema.safeParse(parseJsonText(bodyText));
       if (!parsed.success) {
         const mismatch = parsed.error.issues.some(issue => issue.path.includes('confirmPassword'));
-        sendJson(response, 400, { code: mismatch ? '7005' : '7002', error: mismatch ? 'Passwords do not match' : 'Invalid account details' });
-        return;
+        return jsonResponse(400, { code: mismatch ? '7005' : '7002', error: mismatch ? 'Passwords do not match' : 'Invalid account details' });
       }
       const { name, email, password } = parsed.data;
-      const existing = await prisma.user.findUnique({ where: { email } });
-      if (existing) {
-        sendJson(response, 409, { code: '7003', error: 'Email already registered' });
-        return;
-      }
       const passwordHash = await hashPassword(password);
-      const user = await prisma.user.create({
-        data: { name, email, passwordHash },
-      });
-      const cookie = await createSessionForUser(prisma, user.id, secure);
-      sendJson(response, 201, { user: publicUser(user) }, { 'Set-Cookie': cookie });
-      return;
+      const outcome = await store.createUser({ name, email, passwordHash });
+      if (outcome.conflict) {
+        return jsonResponse(409, { code: '7003', error: 'Email already registered' });
+      }
+      const cookie = await createSessionCookie(store, outcome.user.id, secure);
+      return jsonResponse(201, { user: publicUser(outcome.user) }, { 'Set-Cookie': cookie });
     }
 
-    if (pathname === '/api/auth/login' && method === 'POST') {
-      const parsed = loginSchema.safeParse(await readJson(request));
+    if (normalizedPath === '/api/auth/login' && method === 'POST') {
+      const parsed = loginSchema.safeParse(parseJsonText(bodyText));
       if (!parsed.success) {
-        sendJson(response, 400, { code: '7002', error: 'Invalid login format' });
-        return;
+        return jsonResponse(400, { code: '7002', error: 'Invalid login format' });
       }
       const { email, password } = parsed.data;
-      const user = await prisma.user.findUnique({ where: { email } });
+      const user = await store.findUserByEmail(email);
       if (!user || !(await verifyPassword(password, user.passwordHash))) {
-        sendJson(response, 401, { code: '7001', error: 'Invalid credentials' });
-        return;
+        return jsonResponse(401, { code: '7001', error: 'Invalid credentials' });
       }
-      const cookie = await createSessionForUser(prisma, user.id, secure);
-      sendJson(response, 200, { user: publicUser(user) }, { 'Set-Cookie': cookie });
-      return;
+      const cookie = await createSessionCookie(store, user.id, secure);
+      return jsonResponse(200, { user: publicUser(user) }, { 'Set-Cookie': cookie });
     }
 
-    if (pathname === '/api/auth/logout' && method === 'POST') {
-      const cookies = parseCookies(request.headers.cookie);
-      const token = cookies[SESSION_COOKIE];
-      if (token) {
-        await prisma.session.deleteMany({ where: { tokenHash: hashSessionToken(token) } });
-      }
-      sendJson(response, 200, { ok: true }, { 'Set-Cookie': buildSessionCookie('', { secure, maxAge: 0 }) });
-      return;
+    if (normalizedPath === '/api/auth/logout' && method === 'POST') {
+      if (token) await store.deleteSessionByHash(hashSessionToken(token));
+      return jsonResponse(200, { ok: true }, { 'Set-Cookie': buildSessionCookie('', { secure, maxAge: 0 }) });
     }
 
-    // Authenticated user routes below
-    const auth = await resolveSession(prisma, request);
+    const auth = token ? await store.findSession(hashSessionToken(token)) : null;
     if (!auth) {
-      sendJson(response, 401, { code: '7001', error: 'Authentication required' });
-      return;
+      return jsonResponse(401, { code: '7001', error: 'Authentication required' });
     }
     const userId = auth.user.id;
 
-    if (pathname === '/api/projects' && method === 'GET') {
-      const rows = await prisma.projectRecord.findMany({
-        where: { userId },
-        orderBy: { updatedAt: 'desc' },
-      });
-      const projects = rows.flatMap(row => {
-        try { return [JSON.parse(row.data)]; } catch { return []; }
-      });
-      sendJson(response, 200, { projects });
-      return;
+    if (normalizedPath === '/api/projects' && method === 'GET') {
+      return jsonResponse(200, { projects: await store.listProjects(userId) });
     }
 
-    if (pathname === '/api/projects' && method === 'DELETE') {
-      await prisma.$transaction([
-        prisma.projectRecord.deleteMany({ where: { userId } }),
-        prisma.favoriteSound.deleteMany({ where: { userId } }),
-      ]);
-      sendJson(response, 200, { ok: true });
-      return;
+    if (normalizedPath === '/api/projects' && method === 'DELETE') {
+      await store.deleteAllUserData(userId);
+      return jsonResponse(200, { ok: true });
     }
 
-    if (pathname.startsWith('/api/projects/')) {
-      const id = pathname.slice('/api/projects/'.length);
+    if (normalizedPath.startsWith('/api/projects/')) {
+      const id = normalizedPath.slice('/api/projects/'.length);
       if (!UUID_RE.test(id)) {
-        sendJson(response, 400, { code: '4002', error: 'Invalid project id' });
-        return;
+        return jsonResponse(400, { code: '4002', error: 'Invalid project id' });
       }
-
       if (method === 'GET') {
-        const record = await prisma.projectRecord.findFirst({ where: { id, userId } });
-        if (!record) {
-          sendJson(response, 404, { error: 'Project not found' });
-          return;
-        }
-        sendJson(response, 200, { project: JSON.parse(record.data) });
-        return;
+        const project = await store.getProject(id, userId);
+        return project ? jsonResponse(200, { project }) : jsonResponse(404, { error: 'Project not found' });
       }
-
       if (method === 'PUT') {
-        const parsed = projectSaveSchema.safeParse(await readJson(request));
+        const parsed = projectSaveSchema.safeParse(parseJsonText(bodyText));
         if (!parsed.success || parsed.data.project.id !== id) {
-          sendJson(response, 400, { code: '4002', error: 'Invalid project payload' });
-          return;
+          return jsonResponse(400, { code: '4002', error: 'Invalid project payload' });
         }
-        const { expectedRevision, project } = parsed.data;
-        const outcome = await prisma.$transaction(async tx => {
-          const existing = await tx.projectRecord.findUnique({ where: { id } });
-          if (existing && existing.userId !== userId) return { status: 403 };
-          if ((existing?.revision ?? null) !== expectedRevision) return { status: 409 };
-          const next = {
-            ...project,
-            revision: (expectedRevision ?? 0) + 1,
-            updatedAt: new Date().toISOString(),
-          };
-          const serialized = JSON.stringify(next);
-          await tx.projectRecord.upsert({
-            where: { id },
-            create: { id, userId, name: next.name, revision: next.revision, data: serialized },
-            update: { name: next.name, revision: next.revision, data: serialized },
-          });
-          return { status: 200, project: next };
+        const outcome = await store.upsertProject({
+          id,
+          userId,
+          project: parsed.data.project,
+          expectedRevision: parsed.data.expectedRevision,
         });
-        if (outcome.status === 403) {
-          sendJson(response, 403, { error: 'Forbidden' });
-          return;
-        }
-        if (outcome.status === 409) {
-          sendJson(response, 409, { code: '4003', error: 'Revision conflict' });
-          return;
-        }
-        sendJson(response, 200, { project: outcome.project });
-        return;
+        if (outcome.status === 403) return jsonResponse(403, { error: 'Forbidden' });
+        if (outcome.status === 409) return jsonResponse(409, { code: '4003', error: 'Revision conflict' });
+        return jsonResponse(200, { project: outcome.project });
       }
-
       if (method === 'DELETE') {
-        await prisma.projectRecord.deleteMany({ where: { id, userId } });
-        sendJson(response, 200, { ok: true });
-        return;
+        await store.deleteProject(id, userId);
+        return jsonResponse(200, { ok: true });
       }
     }
 
-    if (pathname === '/api/favorites' && method === 'GET') {
-      const rows = await prisma.favoriteSound.findMany({
-        where: { userId },
-        orderBy: { createdAt: 'asc' },
-      });
-      sendJson(response, 200, { favorites: rows.map(r => r.soundId) });
-      return;
+    if (normalizedPath === '/api/favorites' && method === 'GET') {
+      return jsonResponse(200, { favorites: await store.listFavorites(userId) });
     }
 
-    if (pathname.startsWith('/api/favorites/') && method === 'PUT') {
-      const soundId = pathname.slice('/api/favorites/'.length);
+    if (normalizedPath.startsWith('/api/favorites/') && method === 'PUT') {
+      const soundId = decodeURIComponent(normalizedPath.slice('/api/favorites/'.length));
       if (!SOUND_ID_RE.test(soundId)) {
-        sendJson(response, 400, { code: '4002', error: 'Invalid sound id' });
-        return;
+        return jsonResponse(400, { code: '4002', error: 'Invalid sound id' });
       }
-      const parsed = favoriteSchema.safeParse(await readJson(request));
+      const parsed = favoriteSchema.safeParse(parseJsonText(bodyText));
       if (!parsed.success) {
-        sendJson(response, 400, { code: '4002', error: 'Invalid payload' });
-        return;
+        return jsonResponse(400, { code: '4002', error: 'Invalid payload' });
       }
-      if (parsed.data.favorite) {
-        await prisma.favoriteSound.upsert({
-          where: { userId_soundId: { userId, soundId } },
-          create: { userId, soundId },
-          update: {},
-        });
-      } else {
-        await prisma.favoriteSound.deleteMany({ where: { userId, soundId } });
-      }
-      sendJson(response, 200, { favorite: parsed.data.favorite });
-      return;
+      await store.setFavorite(userId, soundId, parsed.data.favorite);
+      return jsonResponse(200, { favorite: parsed.data.favorite });
     }
 
-    sendJson(response, 404, { error: 'Not found' });
+    return jsonResponse(404, { error: 'Not found' });
   } catch (error) {
     const status = error?.status ?? 500;
-    sendJson(response, status, { error: status >= 500 ? 'Internal server error' : error.message });
+    return jsonResponse(status, { error: status >= 500 ? 'Internal server error' : error.message });
   }
+}
+
+export async function handleApiRequest(request, response, pathname, dbOrStore) {
+  const store = isDataStore(dbOrStore) ? dbOrStore : createPrismaStore(dbOrStore);
+  let res;
+  try {
+    const bodyText = request.method !== 'GET' && request.method !== 'HEAD' ? await readNodeBody(request) : '';
+    res = await handleApiCore({
+      method: request.method ?? 'GET',
+      pathname,
+      headers: request.headers,
+      bodyText,
+      requestUrl: request.url,
+      store,
+    });
+  } catch (error) {
+    const status = error?.status ?? 500;
+    res = jsonResponse(status, { error: status >= 500 ? 'Internal server error' : error.message });
+  }
+  response.writeHead(res.status, {
+    ...res.headers,
+    'Content-Length': Buffer.byteLength(res.payload),
+  }).end(res.payload);
+}
+
+export async function handleWebApiRequest(request, dbOrStore) {
+  const store = isDataStore(dbOrStore) ? dbOrStore : createPrismaStore(dbOrStore);
+  const url = new URL(request.url);
+  const bodyText = request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : '';
+  const res = await handleApiCore({
+    method: request.method,
+    pathname: decodeURIComponent(url.pathname),
+    headers: request.headers,
+    bodyText,
+    requestUrl: request.url,
+    store,
+  });
+  return new Response(res.payload, { status: res.status, headers: res.headers });
 }

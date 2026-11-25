@@ -135,7 +135,10 @@ export function usePreview(project: Project, assets: ReadonlyMap<string, StoredA
     setPlaying(true);
     try {
       if (buffer) {
-        context.current ??= new AudioContext({ sampleRate: 48000 });
+        if (!context.current) {
+          try { context.current = new AudioContext({ sampleRate: 48000 }); }
+          catch { context.current = new AudioContext(); }
+        }
         await context.current.resume();
       }
       await paint(initial, false, token);

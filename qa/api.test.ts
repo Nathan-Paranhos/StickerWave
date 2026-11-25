@@ -5,6 +5,42 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createDistributionServer } from '../scripts/serve.mjs';
+import { handleWebApiRequest } from '../server/api.mjs';
+import { createBlobsStore } from '../server/stores.mjs';
+
+function createMemoryBlobs() {
+  const entries = new Map<string, { json: string; etag: string }>();
+  let seq = 0;
+  return {
+    async list({ prefix = '' } = {}) {
+      const blobs = [...entries.entries()]
+        .filter(([key]) => key.startsWith(prefix))
+        .map(([key, value]) => ({ key, etag: value.etag }));
+      return { blobs, directories: [] };
+    },
+    async get(key: string) {
+      const item = entries.get(key);
+      return item ? JSON.parse(item.json) : null;
+    },
+    async getWithMetadata(key: string) {
+      const item = entries.get(key);
+      return item ? { data: JSON.parse(item.json), etag: item.etag, metadata: {} } : null;
+    },
+    async setJSON(key: string, data: unknown, options: { onlyIfNew?: boolean; onlyIfMatch?: string } = {}) {
+      const current = entries.get(key);
+      if (options.onlyIfNew && current) return { modified: false };
+      if (options.onlyIfMatch !== undefined && (!current || current.etag !== options.onlyIfMatch)) {
+        return { modified: false };
+      }
+      const etag = `etag-${++seq}`;
+      entries.set(key, { json: JSON.stringify(data), etag });
+      return { modified: true, etag };
+    },
+    async delete(key: string) {
+      entries.delete(key);
+    },
+  };
+}
 
 function extractCookie(response) {
   const setCookie = response.headers.get('set-cookie');
@@ -127,4 +163,86 @@ test('auth, sessions, optimistic concurrency and multi-user isolation work via P
   const logoutA = await fetch(origin + '/api/auth/logout', { method: 'POST', headers: { Cookie: cookieA } });
   assert.equal(logoutA.status, 200);
   assert.equal((await fetch(origin + '/api/projects', { headers: { Cookie: cookieA } })).status, 401);
+});
+
+test('Netlify Web API handler and Blobs store handle auth, rewritten paths, projects and favorites', async () => {
+  const store = createBlobsStore(createMemoryBlobs());
+  const callApi = (path: string, init: RequestInit = {}) =>
+    handleWebApiRequest(new Request(`https://stickerwave.netlify.app${path}`, init), store);
+
+  assert.equal((await callApi('/api/health')).status, 200);
+  assert.equal((await callApi('/api/projects')).status, 401);
+
+  const crossOrigin = await callApi('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' },
+    body: JSON.stringify({ name: 'Eva', email: 'eva@example.com', password: 'secret123', confirmPassword: 'secret123' }),
+  });
+  assert.equal(crossOrigin.status, 403);
+
+  // Supports Netlify _redirects rewritten path (/.netlify/functions/api/:splat)
+  const reg = await callApi('/.netlify/functions/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://stickerwave.netlify.app' },
+    body: JSON.stringify({ name: 'Clara', email: 'clara@example.com', password: 'secret123', confirmPassword: 'secret123' }),
+  });
+  assert.equal(reg.status, 201);
+  const setCookie = reg.headers.get('set-cookie') ?? '';
+  assert.match(setCookie, /Secure/);
+  const cookieClara = setCookie.split(';')[0];
+
+  const dup = await callApi('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Clara 2', email: 'CLARA@example.com', password: 'secret123', confirmPassword: 'secret123' }),
+  });
+  assert.equal(dup.status, 409);
+
+  const projectId = crypto.randomUUID();
+  const baseProject = {
+    schemaVersion: 2,
+    id: projectId,
+    revision: 0,
+    name: 'Figurinha Blobs',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  const put1 = await callApi(`/.netlify/functions/api/projects/${projectId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Cookie: cookieClara },
+    body: JSON.stringify({ expectedRevision: null, project: baseProject }),
+  });
+  assert.equal(put1.status, 200);
+  const saved = (await put1.json()).project;
+  assert.equal(saved.revision, 1);
+
+  const stale = await callApi(`/api/projects/${projectId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Cookie: cookieClara },
+    body: JSON.stringify({ expectedRevision: 0, project: saved }),
+  });
+  assert.equal(stale.status, 409);
+
+  await callApi('/api/favorites/clap', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Cookie: cookieClara },
+    body: JSON.stringify({ favorite: true }),
+  });
+  assert.deepEqual(await (await callApi('/api/favorites', { headers: { Cookie: cookieClara } })).json(), { favorites: ['clap'] });
+
+  const reg2 = await callApi('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Daniel', email: 'daniel@example.com', password: 'secret456' }),
+  });
+  const cookieDaniel = (reg2.headers.get('set-cookie') ?? '').split(';')[0];
+  assert.equal((await callApi(`/api/projects/${projectId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Cookie: cookieDaniel },
+    body: JSON.stringify({ expectedRevision: 1, project: saved }),
+  })).status, 403);
+
+  assert.equal((await callApi('/api/projects', { method: 'DELETE', headers: { Cookie: cookieClara } })).status, 200);
+  assert.deepEqual((await (await callApi('/api/projects', { headers: { Cookie: cookieClara } })).json()).projects, []);
+  assert.deepEqual(await (await callApi('/api/favorites', { headers: { Cookie: cookieClara } })).json(), { favorites: [] });
 });

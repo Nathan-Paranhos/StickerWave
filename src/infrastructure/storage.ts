@@ -1,5 +1,5 @@
 import { projectRefs, projectSchema, validateAssets, type Project, type StoredAsset } from '../core/project';
-import { apiDeleteProject, apiListFavorites, apiListProjects, apiLoadProject, apiSaveProject, apiSetFavorite } from './api';
+import { apiDeleteProject, apiListFavorites, apiListProjects, apiLoadProject, apiSaveProject, apiSetFavorite, isRemoteAccountMode } from './api';
 
 const databases = new Map<string, Promise<IDBDatabase>>();
 let activeUserId: string | null = null;
@@ -9,7 +9,7 @@ export function setStorageUser(userId: string | null) {
 }
 
 function remoteActive() {
-  return Boolean(activeUserId && typeof window !== 'undefined' && typeof fetch === 'function' && navigator.onLine !== false);
+  return Boolean(activeUserId && isRemoteAccountMode() && typeof window !== 'undefined' && typeof fetch === 'function' && navigator.onLine !== false);
 }
 
 function dbName() {
@@ -183,7 +183,11 @@ export async function favoriteIds() {
 
 export async function changeFavorite(id: string, value: boolean) {
   if (remoteActive()) {
-    await apiSetFavorite(id, value);
+    try {
+      await apiSetFavorite(id, value);
+    } catch (error) {
+      if (!(error instanceof Error && error.message === '7004')) throw error;
+    }
   }
   const tx = (await open()).transaction('favorites', 'readwrite');
   const done = completed(tx);

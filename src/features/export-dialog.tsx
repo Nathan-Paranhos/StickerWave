@@ -56,7 +56,7 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
     if (operation.current) return;
     const chosenFormat = overrideFormat ?? format;
     const chosenContainer = overrideContainer ?? container;
-    if (overrideFormat) setFormat(overrideFormat);
+    if (overrideFormat) setFormat(overrideFormat === 'whatsapp-image' ? 'webp' : overrideFormat);
     if (overrideContainer) setContainer(overrideContainer);
     const task = new AbortController();
     operation.current = task;
@@ -93,7 +93,22 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
 
   const shareable = result && navigator.canShare?.({ files: [result.file] });
   const canClipboardImage = typeof ClipboardItem !== 'undefined' && Boolean(navigator.clipboard?.write) && visual;
-  const isWhatsappMedia = result && (result.exportedFormat === 'video' || result.exportedFormat === 'webp' || result.exportedFormat === 'animated-webp');
+  const isWhatsappMedia = result && (result.exportedFormat === 'video' || result.exportedFormat === 'webp' || result.exportedFormat === 'animated-webp' || result.exportedFormat === 'whatsapp-image');
+  const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
+  async function shareToWhatsapp() {
+    if (!result) return;
+    try {
+      await navigator.share({ files: [result.file], title: project.name });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      try {
+        await navigator.share({ files: [result.file] });
+      } catch (fallbackError) {
+        if (!(fallbackError instanceof DOMException && fallbackError.name === 'AbortError')) setFailure('3004');
+      }
+    }
+  }
 
   return <Modal title={copy.exportTitle} className="export-modal" close={() => operation.current ? operation.current.abort(new Error('3002')) : close()}>
     {!result && whatsappTarget && <div className="whatsapp-direct-box">
@@ -102,7 +117,7 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
         <p>{copy.whatsappDirectBody}</p>
       </div>
       <button type="button" className="button button-green" disabled={progress !== undefined}
-        onClick={() => void start(whatsappTarget, '')}>
+        onClick={() => void start(whatsappTarget === 'webp' ? 'whatsapp-image' : whatsappTarget, '')}>
         <MessageCircle size={17} />{copy.whatsappDirectAction}
       </button>
     </div>}
@@ -120,16 +135,17 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
     {failure && <Notice error={failure !== '3002'}>{copy.errors[failure]} [SW-{failure}]</Notice>}
     {progress !== undefined && <div className="progress-area" role="status"><p>{copy.exporting}</p><progress value={progress || undefined} max={1} /></div>}
     {result && <div className="export-result" role="status"><h3>{copy.exportDone}</h3><p>{result.file.name} · {(result.blob.size / 1024).toFixed(1)} KB</p>
-      {result.extension === 'webp' && <img src={result.url} width="128" height="128" alt={copy.preview} />}
-      {result.exportedFormat === 'webp' && result.blob.size > 100 * 1024 && <p>{copy.sizeWarning}</p>}
+      {(result.extension === 'webp' || result.extension === 'png') && <img src={result.url} width="128" height="128" alt={copy.preview} />}
+      {(result.exportedFormat === 'webp' || result.exportedFormat === 'whatsapp-image') && result.extension === 'webp' && result.blob.size > 100 * 1024 && <p>{copy.sizeWarning}</p>}
       <div className="button-row">
-        {shareable && <button type="button" className="button button-green" onClick={() => void navigator.share({
-          files: [result.file], title: project.name, text: copy.whatsappShareText,
-        }).catch(error => { if (!(error instanceof DOMException && error.name === 'AbortError')) setFailure('3004'); })}>
+        {shareable && <button type="button" className="button button-green" onClick={() => void shareToWhatsapp()}>
           <Share2 size={17} />{copy.whatsappSendDirect}
         </button>}
         <a className={`button ${shareable ? 'button-outline' : 'button-green'}`} href={result.url} download={result.file.name}><Download size={18} />{copy.download}</a>
-        {isWhatsappMedia && <a className="button button-outline" href="https://web.whatsapp.com" target="_blank" rel="noopener noreferrer">
+        {isWhatsappMedia && <a className="button button-outline" href="https://api.whatsapp.com/send" target="_blank" rel="noopener noreferrer">
+          <ExternalLink size={16} />{copy.whatsappOpenApp}
+        </a>}
+        {isWhatsappMedia && !isMobile && <a className="button button-outline" href="https://web.whatsapp.com" target="_blank" rel="noopener noreferrer">
           <ExternalLink size={16} />{copy.whatsappOpenWeb}
         </a>}
         {isWhatsappMedia && canClipboardImage && <button type="button" className="button button-outline" onClick={() => void copyFrameForWhatsApp()}>
