@@ -198,11 +198,11 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
       <p>{kit.imageFile.name} · {(kit.imageFile.size / 1024).toFixed(1)} KB + {kit.audioFile.name} · {(kit.audioFile.size / 1024).toFixed(1)} KB</p>
       <img src={kit.imageUrl} width="128" height="128" alt={copy.preview} />
       <div className="button-row">
-        {kitShareable && <button type="button" className="button button-green" onClick={() => void shareFiles([kit.imageFile, kit.audioFile])}>
+        <a className="button button-green" href={kit.imageUrl} download={kit.imageFile.name}><Download size={17} />{copy.whatsappKitDownloadImg}</a>
+        <a className="button button-green" href={kit.audioUrl} download={kit.audioFile.name}><Download size={17} />{copy.whatsappKitDownloadAudio}</a>
+        {kitShareable && <button type="button" className="button button-outline" onClick={() => void shareFiles([kit.imageFile, kit.audioFile])}>
           <Share2 size={17} />{copy.whatsappKitShareBoth}
         </button>}
-        <a className={`button ${kitShareable ? 'button-outline' : 'button-green'}`} href={kit.imageUrl} download={kit.imageFile.name}><Download size={17} />{copy.whatsappKitDownloadImg}</a>
-        <a className="button button-outline" href={kit.audioUrl} download={kit.audioFile.name}><Download size={17} />{copy.whatsappKitDownloadAudio}</a>
         <a className="button button-outline" href="https://api.whatsapp.com/send" target="_blank" rel="noopener noreferrer">
           <ExternalLink size={16} />{copy.whatsappOpenApp}
         </a>
@@ -228,10 +228,10 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
       {result.exportedFormat === 'webp' && result.extension === 'webp' && result.blob.size > 100 * 1024 && <p>{copy.sizeWarning}</p>}
       {result.exportedFormat === 'video' && sound && totalDuration > 5000 && <Notice>{copy.whatsappDurationNote}</Notice>}
       <div className="button-row">
-        {shareable && <button type="button" className="button button-green" onClick={() => void shareFiles([result.file])}>
+        <a className="button button-green" href={result.url} download={result.file.name}><Download size={18} />{copy.download}</a>
+        {shareable && <button type="button" className="button button-outline" onClick={() => void shareFiles([result.file])}>
           <Share2 size={17} />{copy.whatsappSendDirect}
         </button>}
-        <a className={`button ${shareable ? 'button-outline' : 'button-green'}`} href={result.url} download={result.file.name}><Download size={18} />{copy.download}</a>
         {isWhatsappMedia && visual && sound && <button type="button" className="button button-outline" disabled={progress !== undefined} onClick={() => void buildWhatsappKit()}>
           <AudioLines size={16} />{copy.whatsappKitAction}
         </button>}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from 'react';
-import { AudioLines, CloudDownload, Download, FolderOpen, Globe2, ImagePlus, Layers, LoaderCircle, LogOut, Play, Redo2, Sparkles, Square, Undo2, Upload, Volume2, WifiOff, Wrench, Type } from 'lucide-react';
+import { AudioLines, CloudDownload, Download, FolderOpen, Globe2, ImagePlus, Layers, LoaderCircle, LogOut, Play, Redo2, Sparkles, Square, Undo2, Upload, Volume2, VolumeX, WifiOff, Wrench, Type } from 'lucide-react';
 import { Link, useApp } from '../app/context';
 import { Bars, Modal, Notice } from '../app/shared';
 import { audioTracks, clamp, createProject, initialSound, initialVisual, motion, newTrim, projectRefs, trackDuration, updateTrim, visualLayers, MAX_DURATION, MAX_LAYERS, MAX_TRACKS, type Project, type StoredAsset, type Trim } from '../core/project';
@@ -454,8 +454,9 @@ function Editor({ session, query }: { session: Session; query: string }) {
                 className={`sticker-sound-badge ${preview.playing ? 'playing' : ''}`}
                 aria-label={preview.playing ? copy.stop : copy.tapToPlaySticker}
                 onClick={() => void preview.play()}>
-                <Volume2 size={16} />
+                {preview.playing ? <Volume2 size={18} /> : <VolumeX size={18} />}
               </button>}
+              {previewMode === 'whatsapp' && haveComposition && <span className="whatsapp-sticker-time" aria-hidden="true">13:10 ✓✓</span>}
               {layers.some(l => l.kind === 'text' && !project.hidden.includes(l.id)) && <p className="sr-only">{copy.readText}. {layers.flatMap(l => l.kind === 'text' && !project.hidden.includes(l.id) ? [l.style.content] : []).join('. ')}</p>}
               {!layers.length && <div className="drop-card">
                 <div className="drop-icon"><ImagePlus size={27} /></div>
@@ -466,7 +467,6 @@ function Editor({ session, query }: { session: Session; query: string }) {
             </div>
             {previewMode === 'whatsapp' && haveComposition && <p className="whatsapp-bubble-meta">
               <span>{copy.tapToPlaySticker}</span>
-              <time aria-hidden="true">10:42 ✓✓</time>
             </p>}
           </div>
         </div>
