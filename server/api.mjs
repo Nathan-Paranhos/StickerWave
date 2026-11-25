@@ -12,6 +12,10 @@ const registerSchema = z.object({
   name: z.string().trim().min(2).max(80),
   email: z.string().trim().toLowerCase().email().max(160),
   password: z.string().min(6).max(128),
+  confirmPassword: z.string().optional(),
+}).refine(data => data.confirmPassword === undefined || data.password === data.confirmPassword, {
+  message: 'Password mismatch',
+  path: ['confirmPassword'],
 });
 
 const loginSchema = z.object({
@@ -125,7 +129,8 @@ export async function handleApiRequest(request, response, pathname, prisma) {
     if (pathname === '/api/auth/register' && method === 'POST') {
       const parsed = registerSchema.safeParse(await readJson(request));
       if (!parsed.success) {
-        sendJson(response, 400, { code: '7002', error: 'Invalid account details' });
+        const mismatch = parsed.error.issues.some(issue => issue.path.includes('confirmPassword'));
+        sendJson(response, 400, { code: mismatch ? '7005' : '7002', error: mismatch ? 'Passwords do not match' : 'Invalid account details' });
         return;
       }
       const { name, email, password } = parsed.data;

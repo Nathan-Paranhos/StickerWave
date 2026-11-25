@@ -38,6 +38,13 @@ test('auth, sessions, optimistic concurrency and multi-user isolation work via P
   });
   assert.equal(badReg.status, 400);
 
+  const badConfirm = await fetch(origin + '/api/auth/register', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Alice', email: 'alice-mismatch@example.com', password: 'secret123', confirmPassword: 'different' }),
+  });
+  assert.equal(badConfirm.status, 400);
+  assert.equal((await badConfirm.json()).code, '7005');
+
   const regA = await fetch(origin + '/api/auth/register', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: 'Alice Silva', email: 'alice@example.com', password: 'secret123' }),

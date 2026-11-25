@@ -76,7 +76,8 @@ try {
   await page.goto(origin + '/auth');
   await page.getByLabel('Nome').fill('QA Sticker');
   await page.getByLabel('E-mail').fill('qa@example.com');
-  await page.getByLabel('Senha').fill('sticker123');
+  await page.getByLabel('Senha', { exact: true }).fill('sticker123');
+  await page.getByLabel('Confirmar senha', { exact: true }).fill('sticker123');
   await page.getByRole('button', { name: 'Criar conta grátis' }).last().click();
   await page.getByRole('button', { name: 'Editar um exemplo' }).waitFor();
   await page.goto(origin);

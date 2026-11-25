@@ -67,7 +67,7 @@ function App() {
     document.documentElement.lang = locale === 'pt' ? 'pt-BR' : 'en-US';
     document.title = path === '/' ? `StickerWave · ${copy.heroTitle} ${copy.heroSecond}` : `StickerWave · ${studio ? copy.studio : path === '/auth' ? copy.account : copy[path.slice(1) as EditorialPage] ?? copy.studio}`;
   }, [locale, copy, path, studio]);
-  const register = async (input: { name: string; email: string; password: string }) => {
+  const register = async (input: { name: string; email: string; password: string; confirmPassword?: string }) => {
     const created = await registerAccount(input);
     setStorageUser(created.id);
     setUser(created);

@@ -60,7 +60,7 @@ export async function fetchCurrentUser(): Promise<AuthUser | null> {
   }
 }
 
-export async function registerAccount(input: { name: string; email: string; password: string }): Promise<AuthUser> {
+export async function registerAccount(input: { name: string; email: string; password: string; confirmPassword?: string }): Promise<AuthUser> {
   let res;
   try {
     res = await apiJson<{ user?: AuthUser; code?: string }>('/api/auth/register', {

@@ -9,7 +9,7 @@ type AppContext = {
   copy: Copy; locale: Locale; theme: Theme; resolvedTheme: ResolvedTheme; setTheme: (theme: Theme) => void;
   toggleLanguage: () => void; path: string; navigate: (to: string, replace?: boolean, soft?: boolean) => void;
   user: AuthUser | null; authReady: boolean;
-  register: (input: { name: string; email: string; password: string }) => Promise<AuthUser>;
+  register: (input: { name: string; email: string; password: string; confirmPassword?: string }) => Promise<AuthUser>;
   login: (input: { email: string; password: string }) => Promise<AuthUser>;
   logout: () => Promise<void>;
 };
