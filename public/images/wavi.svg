@@ -1,0 +1,351 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     viewBox="0 0 1150 767"
+     width="1150"
+     height="767">
+
+  <title>Mascote musical verde</title>
+
+  <defs>
+    <!-- Gradiente do corpo -->
+    <radialGradient id="body" cx="62%" cy="27%" r="77%">
+      <stop stop-color="#efffa0"/>
+      <stop offset=".38" stop-color="#d9fa54"/>
+      <stop offset=".72" stop-color="#b7e32c"/>
+      <stop offset="1" stop-color="#789d10"/>
+    </radialGradient>
+
+    <!-- Braços e pés -->
+    <linearGradient id="limb" x1=".2" y1="0" x2=".8" y2="1">
+      <stop stop-color="#e4ff75"/>
+      <stop offset=".55" stop-color="#b9e332"/>
+      <stop offset="1" stop-color="#82a913"/>
+    </linearGradient>
+
+    <!-- Cabelo -->
+    <linearGradient id="hair" x1=".55" y1="0" x2=".35" y2="1">
+      <stop stop-color="#efffa0"/>
+      <stop offset=".55" stop-color="#c8ef43"/>
+      <stop offset="1" stop-color="#94ba19"/>
+    </linearGradient>
+
+    <!-- Arco do headphone -->
+    <linearGradient id="band" x1="0" y1="0" x2=".7" y2="1">
+      <stop stop-color="#626260"/>
+      <stop offset=".4" stop-color="#343533"/>
+      <stop offset="1" stop-color="#151714"/>
+    </linearGradient>
+
+    <!-- Fones -->
+    <linearGradient id="cup" x1="0" y1=".2" x2="1" y2=".8">
+      <stop stop-color="#575855"/>
+      <stop offset=".55" stop-color="#343532"/>
+      <stop offset="1" stop-color="#181a17"/>
+    </linearGradient>
+
+    <radialGradient id="pad" cx="28%" cy="23%" r="85%">
+      <stop stop-color="#535450"/>
+      <stop offset="1" stop-color="#242623"/>
+    </radialGradient>
+
+    <!-- Olhos -->
+    <linearGradient id="eye" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#383b32"/>
+      <stop offset="1" stop-color="#10120e"/>
+    </linearGradient>
+
+    <!-- Boca -->
+    <linearGradient id="mouth" x2="0" y2="1">
+      <stop stop-color="#210c0b"/>
+      <stop offset="1" stop-color="#662a25"/>
+    </linearGradient>
+
+    <radialGradient id="tongue" cx="40%" cy="20%" r="80%">
+      <stop stop-color="#f38c86"/>
+      <stop offset="1" stop-color="#c65e5c"/>
+    </radialGradient>
+
+    <!-- Elementos musicais -->
+    <radialGradient id="purple" cx="38%" cy="20%" r="85%">
+      <stop stop-color="#e8c3ff"/>
+      <stop offset=".65" stop-color="#c291ed"/>
+      <stop offset="1" stop-color="#8b5abf"/>
+    </radialGradient>
+
+    <!-- Sombra -->
+    <filter id="shadow"
+            x="-40%"
+            y="-80%"
+            width="180%"
+            height="260%">
+      <feGaussianBlur stdDeviation="13"/>
+    </filter>
+
+    <!-- Máscara da boca -->
+    <clipPath id="mouth2">
+      <path d="
+        M524 420
+        Q522 407 536 409
+        Q575 420 614 409
+        Q628 407 626 420
+        C621 456 601 482 575 482
+        C549 482 529 456 524 420Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Sombra no chão -->
+  <ellipse
+    cx="575"
+    cy="711"
+    rx="275"
+    ry="15"
+    fill="#263315"
+    opacity=".19"
+    filter="url(#shadow)"/>
+
+  <!-- Arco simétrico do headphone -->
+  <g id="headphone-band">
+
+    <path
+      d="
+        M323 302
+        L323 262
+        C323 114 435 34 575 34
+        C715 34 827 114 827 262
+        L827 302
+        L774 302
+        L774 262
+        C774 145 687 87 575 87
+        C463 87 376 145 376 262
+        L376 302Z"
+      fill="url(#band)"/>
+
+    <path
+      d="M339 245
+         C346 125 446 49 575 49
+         C704 49 804 125 811 245"
+      fill="none"
+      stroke="#777875"
+      stroke-opacity=".36"
+      stroke-width="8"
+      stroke-linecap="round"/>
+
+  </g>
+
+  <!-- Pés -->
+  <g id="feet">
+
+    <path
+      d="
+        M420 628
+        C397 652 385 697 409 716
+        C430 732 489 727 510 712
+        C529 697 532 655 527 638Z"
+      fill="url(#limb)"/>
+
+    <path
+      d="
+        M730 628
+        C753 652 765 697 741 716
+        C720 732 661 727 640 712
+        C621 697 618 655 623 638Z"
+      fill="url(#limb)"/>
+
+  </g>
+
+  <!-- Braços -->
+  <g id="arms">
+
+    <path
+      d="
+        M360 477
+        C322 477 280 505 268 538
+        C255 571 281 602 310 593
+        C340 584 365 552 380 526Z"
+      fill="url(#limb)"/>
+
+    <path
+      d="
+        M790 429
+        C820 397 863 347 891 346
+        C925 345 937 378 918 405
+        C895 441 856 471 804 486Z"
+      fill="url(#limb)"/>
+
+  </g>
+
+  <!-- Corpo principal -->
+  <path
+    id="mascot-body"
+    d="
+      M575 178
+      C446 178 375 249 335 358
+      C311 425 303 493 327 554
+      C364 644 454 678 575 678
+      C696 678 786 644 823 554
+      C847 493 839 425 815 358
+      C775 249 704 178 575 178Z"
+    fill="url(#body)"/>
+
+  <!-- Cabelo -->
+  <path
+    id="mascot-hair"
+    d="
+      M413 239
+      C423 207 469 193 491 173
+      C517 149 513 110 553 99
+      C598 87 641 112 663 151
+      C678 177 674 191 661 189
+      C641 179 620 178 603 191
+      C572 216 559 250 519 261
+      C480 273 435 262 413 239Z"
+    fill="url(#hair)"/>
+
+  <!-- Fone esquerdo -->
+  <g id="left-cup">
+
+    <rect
+      x="323"
+      y="236"
+      width="54"
+      height="73"
+      rx="15"
+      fill="url(#band)"
+      stroke="#252724"
+      stroke-width="2"/>
+
+    <path
+      d="
+        M349 274
+        C396 274 416 317 416 377
+        C416 438 392 482 349 482
+        C305 482 282 438 282 377
+        C282 317 305 274 349 274Z"
+      fill="url(#cup)"/>
+
+    <rect
+      x="275"
+      y="284"
+      width="112"
+      height="188"
+      rx="56"
+      fill="url(#cup)"
+      stroke="#20221e"
+      stroke-width="3"/>
+
+    <ellipse
+      cx="316"
+      cy="378"
+      rx="40"
+      ry="77"
+      fill="url(#pad)"
+      stroke="#272925"
+      stroke-width="3"/>
+
+  </g>
+
+  <!-- Fone direito espelhado -->
+  <use
+    href="#left-cup"
+    xlink:href="#left-cup"
+    transform="translate(1150 0) scale(-1 1)"/>
+
+  <!-- Olhos -->
+  <g id="eyes">
+
+    <ellipse
+      cx="502"
+      cy="351"
+      rx="30"
+      ry="53"
+      fill="url(#eye)"/>
+
+    <ellipse
+      cx="648"
+      cy="351"
+      rx="30"
+      ry="53"
+      fill="url(#eye)"/>
+
+    <!-- Reflexos -->
+    <ellipse
+      cx="493"
+      cy="326"
+      rx="9"
+      ry="14"
+      transform="rotate(-22 493 326)"
+      fill="#ffffff"/>
+
+    <ellipse
+      cx="639"
+      cy="326"
+      rx="9"
+      ry="14"
+      transform="rotate(-22 639 326)"
+      fill="#ffffff"/>
+
+  </g>
+
+  <!-- Expressão facial -->
+  <g id="smile">
+
+    <path
+      d="
+        M524 420
+        Q522 407 536 409
+        Q575 420 614 409
+        Q628 407 626 420
+        C621 456 601 482 575 482
+        C549 482 529 456 524 420Z"
+      fill="url(#mouth)"/>
+
+    <ellipse
+      cx="575"
+      cy="470"
+      rx="42"
+      ry="29"
+      fill="url(#tongue)"
+      clip-path="url(#mouth2)"/>
+
+  </g>
+
+  <!-- Estrela decorativa -->
+  <path
+    id="star"
+    d="
+      M220 246
+      C229 246 226 272 246 281
+      C254 285 265 288 260 294
+      C256 301 236 299 227 322
+      C224 330 222 340 216 333
+      C211 327 209 309 194 301
+      C184 296 175 293 182 287
+      C194 281 210 279 215 256
+      Q217 246 220 246Z"
+    fill="url(#purple)"/>
+
+  <!-- Nota musical -->
+  <g id="music-note">
+
+    <circle
+      cx="914"
+      cy="130"
+      r="59"
+      fill="url(#purple)"/>
+
+    <path
+      d="
+        M911 133
+        L918 94
+        Q919 90 924 93
+        L947 102
+        L944 116
+        L925 109
+        L917 145
+        C914 157 900 160 890 152
+        C875 140 892 122 911 133Z"
+      fill="#35263e"/>
+
+  </g>
+
+</svg>
