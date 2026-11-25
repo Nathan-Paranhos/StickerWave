@@ -4,7 +4,7 @@ import { AudioLines, BookOpen, CircleHelp, Code2, Download, FileArchive, Folder,
 import { Brand, Modal, Notice } from '../app/shared';
 import { Link, useApp } from '../app/context';
 import { Wavi } from './wavi';
-import { ThemeControl, InstallControl } from './preferences';
+import { ThemeControl } from './preferences';
 import { FeaturedSounds } from './sounds';
 import { errorCode, type ErrorCode } from '../locales';
 import { listProjects, removeProject, save } from '../infrastructure/storage';
@@ -44,7 +44,7 @@ export function Footer() {
   const { copy } = useApp();
   return <footer className="site-footer">
     <div className="wrap footer-inner">
-      <div><Brand /><p>{copy.footer}</p><div className="button-row footer-preferences"><ThemeControl /><InstallControl /></div></div>
+      <div><Brand /><p>{copy.footer}</p><div className="button-row footer-preferences"><ThemeControl /></div></div>
       <nav aria-label={copy.about}>
         {(['docs', 'privacy', 'licenses', 'contribute', 'about'] as const).map(item => <Link key={item} href={`/${item}`}>{copy[item]}</Link>)}
       </nav>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AudioLines, Bell, Bird, CloudRain, ExternalLink, Gamepad2, Ghost, Headphones, Heart, Laugh, Play, Plus, Search, Shuffle, Square, Trash2, Upload, Wand2, Zap } from 'lucide-react';
+import { AudioLines, Bell, Bird, CloudRain, Download, ExternalLink, Gamepad2, Ghost, Headphones, Heart, Laugh, LoaderCircle, Play, Plus, Search, Shuffle, Square, Trash2, Upload, Wand2, Zap } from 'lucide-react';
 import { Link, useApp } from '../app/context';
 import { Bars, Modal, Notice } from '../app/shared';
 import { catalog, categories, type Sound } from '../infrastructure/catalog';
@@ -176,8 +176,9 @@ export function useSoundPlayer(onMeter?: (meter: AudioMeter) => void) {
   return { playing, play, failed };
 }
 
-export function SoundCard({ sound, playing, play, compact = false, use, favorite, onFavorite, onTag }: {
-  sound: Sound; playing: boolean; play: () => void; compact?: boolean; use?: () => void; favorite?: boolean; onFavorite?: () => void; onTag?: (tag: string) => void;
+export function SoundCard({ sound, playing, play, compact = false, use, favorite, onFavorite, onTag, onDownloadMp3, downloading }: {
+  sound: Sound; playing: boolean; play: () => void; compact?: boolean; use?: () => void; favorite?: boolean;
+  onFavorite?: () => void; onTag?: (tag: string) => void; onDownloadMp3?: () => void; downloading?: boolean;
 }) {
   const { copy, locale } = useApp();
   const Icon = icons[sound.category];
@@ -200,8 +201,14 @@ export function SoundCard({ sound, playing, play, compact = false, use, favorite
     </div>}
     {!compact && <div className="sound-foot">
       <small>{sound.author} · {sound.license}</small>
-      {use ? <button className="button button-small" onClick={use}><Plus size={16} />{copy.use}</button>
-        : <Link className="button button-small" href={`/studio?sound=${sound.id}`}><Plus size={16} />{copy.use}</Link>}
+      <div className="sound-foot-actions">
+        {onDownloadMp3 && <button type="button" className="icon-button" title={copy.downloadMp3} aria-label={`${copy.downloadMp3} ${sound.name[locale]}`}
+          disabled={downloading} onClick={onDownloadMp3}>
+          {downloading ? <LoaderCircle size={16} className="spin" /> : <Download size={16} />}
+        </button>}
+        {use ? <button className="button button-small" onClick={use}><Plus size={16} />{copy.use}</button>
+          : <Link className="button button-small" href={`/studio?sound=${sound.id}`}><Plus size={16} />{copy.use}</Link>}
+      </div>
     </div>}
   </article>;
 }
@@ -241,7 +248,37 @@ export function SoundLibrary({ select, favoritesOnly = false }: { select?: (soun
   const [pending, setPending] = useState<StoredAsset>();
   const [issue, setIssue] = useState<ErrorCode>();
   const [busy, setBusy] = useState(false);
+  const [downloadingId, setDownloadingId] = useState('');
+  const downloadAbort = useRef<AbortController | null>(null);
   const input = useRef<HTMLInputElement>(null);
+
+  useEffect(() => () => { downloadAbort.current?.abort(); }, []);
+
+  async function downloadSoundMp3(sound: Sound) {
+    if (downloadingId) return;
+    const ctrl = new AbortController();
+    downloadAbort.current = ctrl;
+    setDownloadingId(sound.id);
+    setIssue(undefined);
+    try {
+      const response = await fetch(sound.url, { signal: ctrl.signal });
+      if (!response.ok) throw new Error('5001');
+      const wavBlob = await response.blob();
+      const { mp3File } = await import('../infrastructure/codec');
+      const mp3 = await mp3File(wavBlob, ctrl.signal);
+      const url = URL.createObjectURL(mp3);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${sound.id}.mp3`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (error) {
+      if (!ctrl.signal.aborted) setIssue(errorCode(error, '5001'));
+    } finally {
+      if (downloadAbort.current === ctrl) downloadAbort.current = null;
+      setDownloadingId('');
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -320,6 +357,7 @@ export function SoundLibrary({ select, favoritesOnly = false }: { select?: (soun
         <button className="button button-outline" onClick={() => { setQuery(''); setCategory('all'); setLicense('all'); setLengthFilter('all'); setLimit(24); }}>{copy.clearFilters}</button></div>}
       <div className="sound-grid">{visibleCatalog?.map(sound => <SoundCard key={sound.id} sound={sound} playing={player.playing === sound.id}
         play={() => player.play(sound)} use={select ? () => select(sound) : undefined}
+        onDownloadMp3={!select ? () => void downloadSoundMp3(sound) : undefined} downloading={downloadingId === sound.id}
         favorite={favorites.includes(sound.id)} onFavorite={() => toggle(sound.id)} onTag={tag => { setQuery(tag); setSpotlight(''); setLimit(24); }} />)}</div>
       {filtered && filtered.length > limit && <button className="button button-outline library-more" onClick={() => setLimit(value => value + 24)}>{copy.moreSounds}</button>}
     </> : !user ? <div className="empty">

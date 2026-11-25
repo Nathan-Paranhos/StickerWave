@@ -465,9 +465,12 @@ function Editor({ session, query }: { session: Session; query: string }) {
                 <button className="text-button example-button" disabled={Boolean(job)} onClick={demo}><Sparkles size={14} />{exampleLabel}</button>
               </div>}
             </div>
-            {previewMode === 'whatsapp' && haveComposition && <p className="whatsapp-bubble-meta">
+            {previewMode === 'whatsapp' && haveComposition && <div className="whatsapp-bubble-meta">
               <span>{copy.tapToPlaySticker}</span>
-            </p>}
+              <button type="button" className="button button-green button-small" onClick={() => { preview.halt(); setExporting(true); }}>
+                <Download size={15} />{copy.whatsappDirectAction}
+              </button>
+            </div>}
           </div>
         </div>
         <div className="studio-extras"><ThemeControl /><Wavi small level={preview.level} bass={preview.bass}
