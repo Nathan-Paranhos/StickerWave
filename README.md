@@ -67,3 +67,11 @@ Para subir em produção via Docker:
 ```sh
 docker compose up -d --build
 ```
+
+### Conectar o site publicado no Netlify ao Gateway
+
+O Netlify hospeda o frontend estático (`dist/`) e funções serverless (`/api/*`), não mantendo WebSocket contínuo do Baileys. Para ativar o botão **Enviar no WhatsApp** em `https://stickerwave.netlify.app`:
+
+1. Suba `apps/whatsapp-gateway` em um host com Docker e disco persistente (Render usando [render.yaml](apps/whatsapp-gateway/render.yaml), Railway, Fly.io ou VPS HTTPS) — ou exponha localmente com Cloudflare Tunnel (`cloudflared tunnel --url http://127.0.0.1:3001`).
+2. Abra `/whatsapp` no site, informe a URL HTTPS do Gateway + seu `GATEWAY_ADMIN_SECRET` e marque **Publicar esta URL para todos os usuários do site** (ou defina `WHATSAPP_GATEWAY_URL` nas variáveis de ambiente do Netlify).
+3. Conecte o número central do bot pelo QR Code em `/whatsapp`.

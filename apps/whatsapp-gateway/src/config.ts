@@ -78,7 +78,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
   const dbPath = path.resolve(cwd, env.DB_PATH || path.join(dataDir, 'gateway.db'));
   const allowedOriginsRaw =
     env.ALLOWED_ORIGINS ||
-    'http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173';
+    'http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173,https://stickerwave.netlify.app';
   const autoNumbers = new Set(
     (env.AUTO_AUTHORIZE_DEV_NUMBERS || '')
       .split(',')

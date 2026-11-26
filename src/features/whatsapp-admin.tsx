@@ -32,7 +32,11 @@ import {
   fetchGatewayRecentJobs,
   fetchWhatsAppAdminStatus,
   GatewayClientError,
+  getLocalGatewayUrlOverride,
+  publishPublicGatewayUrl,
   reconnectWhatsAppBot,
+  resolveGatewayBaseUrl,
+  setLocalGatewayUrlOverride,
   subscribeWhatsAppAdminEvents,
   verifyGatewayAdminSecret,
 } from '../infrastructure/gateway';
@@ -68,6 +72,8 @@ const STATUS_BADGE_MAP: Record<WhatsAppConnectionStatus, { pt: string; en: strin
 
 export function WhatsAppAdminPage() {
   const { copy, locale } = useApp();
+  const [gatewayUrlInput, setGatewayUrlInput] = useState(() => getLocalGatewayUrlOverride() || '/gateway');
+  const [publishUrlToSite, setPublishUrlToSite] = useState(false);
   const [secretInput, setSecretInput] = useState(readStoredAdminSecret);
   const [adminSecret, setAdminSecret] = useState<string | null>(null);
   const [showSecret, setShowSecret] = useState(false);
@@ -109,11 +115,19 @@ export function WhatsAppAdminPage() {
     }
   }, [copy.waAdminInvalidSecret, copy.waGatewayOffline]);
 
-  // Verify existing sessionStorage secret on initial mount without storing secrets outside tab session
+  // Verify existing sessionStorage secret and discover configured gateway URL on mount
   useEffect(() => {
-    const initial = readStoredAdminSecret();
-    if (!initial) return;
     let mounted = true;
+    void resolveGatewayBaseUrl().then((resolved) => {
+      if (!mounted) return;
+      setGatewayUrlInput(resolved);
+      if (resolved.startsWith('https://')) setPublishUrlToSite(true);
+    });
+
+    const initial = readStoredAdminSecret();
+    if (!initial) return () => {
+      mounted = false;
+    };
     void verifyGatewayAdminSecret(initial)
       .then(() => {
         if (!mounted) return;
@@ -179,11 +193,17 @@ export function WhatsAppAdminPage() {
     if (!secretInput.trim()) return;
     setAuthBusy(true);
     setAuthError(null);
+    const urlTrimmed = gatewayUrlInput.trim() || '/gateway';
+    const secret = secretInput.trim();
     try {
-      await verifyGatewayAdminSecret(secretInput.trim());
-      saveStoredAdminSecret(secretInput.trim());
-      setAdminSecret(secretInput.trim());
-      await loadDashboard(secretInput.trim());
+      setLocalGatewayUrlOverride(urlTrimmed === '/gateway' ? null : urlTrimmed);
+      await verifyGatewayAdminSecret(secret);
+      if (publishUrlToSite && urlTrimmed !== '/gateway') {
+        await publishPublicGatewayUrl(urlTrimmed, secret);
+      }
+      saveStoredAdminSecret(secret);
+      setAdminSecret(secret);
+      await loadDashboard(secret);
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : copy.waAdminInvalidSecret);
     } finally {
@@ -227,6 +247,30 @@ export function WhatsAppAdminPage() {
           <p className="page-intro">{copy.waAdminAuthSubtitle}</p>
           <form className="auth-form" onSubmit={(e) => void handleAdminSignIn(e)}>
             <label className="auth-field">
+              <span>{copy.waAdminGatewayUrlLabel}</span>
+              <input
+                type="text"
+                value={gatewayUrlInput}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setGatewayUrlInput(val);
+                  if (val.trim().startsWith('https://')) setPublishUrlToSite(true);
+                }}
+                placeholder="/gateway ou https://seu-gateway.onrender.com"
+              />
+              <small>{copy.waAdminGatewayUrlHint}</small>
+            </label>
+            {gatewayUrlInput.trim().startsWith('http') && (
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={publishUrlToSite}
+                  onChange={(e) => setPublishUrlToSite(e.target.checked)}
+                />
+                <span>{copy.waAdminPublishSiteUrl}</span>
+              </label>
+            )}
+            <label className="auth-field">
               <span>{copy.waAdminSecretLabel}</span>
               <div className="password-wrap">
                 <input
@@ -253,6 +297,7 @@ export function WhatsAppAdminPage() {
               <ShieldCheck size={17} />
               {authBusy ? copy.checkingAccount : copy.waAdminUnlock}
             </button>
+            <p className="auth-note">{copy.waAdminSetupTip}</p>
           </form>
         </div>
       </section>

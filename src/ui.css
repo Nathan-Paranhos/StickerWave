@@ -621,6 +621,8 @@ progress { height: 13px; width: 100%; accent-color: #6a923b; }
 .wa-job-head strong { display: inline-flex; align-items: center; gap: 6px; }
 .wa-progress-bar { width: 100%; height: 10px; accent-color: #7ca324; }
 .wa-inline-icon { display: inline-flex; align-items: center; gap: 6px; }
+.checkbox-row { display: flex; align-items: center; gap: 8px; font-size: .85rem; font-weight: 700; cursor: pointer; }
+.checkbox-row input[type="checkbox"] { width: 17px; height: 17px; accent-color: #587638; }
 
 [data-theme="dark"] .wa-card,
 [data-theme="dark"] .wa-job-progress { background: #202620; border-color: var(--stone); }

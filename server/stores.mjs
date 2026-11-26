@@ -24,6 +24,10 @@ function favoritesKey(userId) {
   return `favorites/${userId}`;
 }
 
+function gatewayConfigKey() {
+  return 'config/whatsapp-gateway';
+}
+
 export function isDataStore(candidate) {
   return Boolean(candidate && typeof candidate.findUserByEmail === 'function' && typeof candidate.upsertProject === 'function');
 }
@@ -119,6 +123,33 @@ export function createPrismaStore(prisma) {
       } else {
         await prisma.favoriteSound.deleteMany({ where: { userId, soundId } });
       }
+    },
+    async getGatewayConfig() {
+      try {
+        await prisma.$executeRawUnsafe(
+          'CREATE TABLE IF NOT EXISTS AppConfig (key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt TEXT NOT NULL)',
+        );
+        const rows = await prisma.$queryRawUnsafe('SELECT value FROM AppConfig WHERE key = ?', 'whatsapp-gateway');
+        if (Array.isArray(rows) && rows[0]?.value) {
+          return JSON.parse(rows[0].value);
+        }
+      } catch {
+        // Fallback cleanly if database schema is read-only
+      }
+      return null;
+    },
+    async setGatewayConfig(config) {
+      await prisma.$executeRawUnsafe(
+        'CREATE TABLE IF NOT EXISTS AppConfig (key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt TEXT NOT NULL)',
+      );
+      const serialized = JSON.stringify(config);
+      const now = new Date().toISOString();
+      await prisma.$executeRawUnsafe(
+        'INSERT INTO AppConfig (key, value, updatedAt) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt',
+        'whatsapp-gateway',
+        serialized,
+        now,
+      );
     },
   };
 }
@@ -225,6 +256,12 @@ export function createBlobsStore(blobs) {
         ? (current.includes(soundId) ? current : [...current, soundId])
         : current.filter(item => item !== soundId);
       await blobs.setJSON(favoritesKey(userId), { items: next });
+    },
+    async getGatewayConfig() {
+      return (await blobs.get(gatewayConfigKey(), { type: 'json' })) ?? null;
+    },
+    async setGatewayConfig(config) {
+      await blobs.setJSON(gatewayConfigKey(), config);
     },
   };
 }

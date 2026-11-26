@@ -128,6 +128,16 @@ function App() {
     {!studio && <Footer />}
   </Context.Provider>;
 }
+try {
+  const savedTheme = localStorage.getItem('stickerwave:theme');
+  const activeTheme: ResolvedTheme =
+    savedTheme === 'dark' || savedTheme === 'light'
+      ? savedTheme
+      : matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light';
+  document.documentElement.dataset.theme = activeTheme;
+} catch { /* storage optional */ }
 createRoot(document.getElementById('root')!).render(<App />);
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {

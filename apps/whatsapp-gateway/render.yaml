@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: stickerwave-whatsapp-gateway
+    runtime: docker
+    dockerfilePath: apps/whatsapp-gateway/Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /health
+    disk:
+      name: whatsapp-gateway-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 3001
+      - key: ALLOWED_ORIGINS
+        value: https://stickerwave.netlify.app
+      - key: ENABLE_SOUND_STICKERS
+        value: "true"
+      - key: GATEWAY_ADMIN_SECRET
+        generateValue: true
+      - key: GATEWAY_SESSION_SECRET
+        generateValue: true

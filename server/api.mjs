@@ -37,6 +37,32 @@ const projectSaveSchema = z.object({
 });
 
 const favoriteSchema = z.object({ favorite: z.boolean() });
+const gatewayConfigSchema = z.object({
+  gatewayUrl: z.string().trim().max(300).nullable(),
+  adminSecret: z.string().min(6).max(256),
+});
+
+function isDisallowedGatewayHost(hostname) {
+  const lower = hostname.toLowerCase();
+  if (lower === '169.254.169.254' || lower === 'metadata.google.internal' || lower.endsWith('.internal')) return true;
+  if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.0\.0\.0)/.test(lower)) return true;
+  return false;
+}
+
+function validatePublicGatewayUrl(raw, allowLocalHttp) {
+  if (raw === null || raw === '') return null;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  const isHttps = parsed.protocol === 'https:';
+  const isLocalHttp = allowLocalHttp && parsed.protocol === 'http:' && (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost');
+  if (!isHttps && !isLocalHttp) return undefined;
+  if (isDisallowedGatewayHost(parsed.hostname)) return undefined;
+  return parsed.origin + parsed.pathname.replace(/\/+$/, '');
+}
 
 function readHeader(headers, name) {
   if (!headers) return '';
@@ -131,6 +157,55 @@ export async function handleApiCore({ method = 'GET', pathname, headers, bodyTex
     if (normalizedPath === '/api/health' && method === 'GET') {
       await store.ping();
       return jsonResponse(200, { ok: true });
+    }
+
+    if (normalizedPath === '/api/gateway/config' && method === 'GET') {
+      const envUrl = (process.env.WHATSAPP_GATEWAY_URL || '').trim().replace(/\/+$/, '');
+      const stored = typeof store.getGatewayConfig === 'function' ? await store.getGatewayConfig() : null;
+      return jsonResponse(200, {
+        gatewayUrl: envUrl || stored?.gatewayUrl || null,
+        source: envUrl ? 'env' : stored?.gatewayUrl ? 'store' : 'none',
+      });
+    }
+
+    if (normalizedPath === '/api/gateway/config' && method === 'PUT') {
+      const parsed = gatewayConfigSchema.safeParse(parseJsonText(bodyText));
+      if (!parsed.success) {
+        return jsonResponse(400, { code: '4002', error: 'Invalid gateway configuration payload.' });
+      }
+      const cleanUrl = validatePublicGatewayUrl(parsed.data.gatewayUrl, !secure);
+      if (cleanUrl === undefined) {
+        return jsonResponse(400, {
+          code: '4002',
+          error: 'Gateway URL must be a valid public HTTPS URL (or localhost HTTP in local development).',
+        });
+      }
+      const existing = typeof store.getGatewayConfig === 'function' ? await store.getGatewayConfig() : null;
+      const targetVerifyUrl = cleanUrl || existing?.gatewayUrl;
+      if (targetVerifyUrl) {
+        try {
+          const verifyRes = await fetch(`${targetVerifyUrl}/api/v1/admin/whatsapp/auth/verify`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${parsed.data.adminSecret}` },
+            signal: AbortSignal.timeout(6000),
+          });
+          if (!verifyRes.ok) {
+            return jsonResponse(401, {
+              code: '7001',
+              error: 'Target WhatsApp Gateway rejected the provided GATEWAY_ADMIN_SECRET.',
+            });
+          }
+        } catch {
+          return jsonResponse(502, {
+            code: '6001',
+            error: 'Could not reach the specified WhatsApp Gateway URL over HTTPS to verify admin authorization.',
+          });
+        }
+      }
+      if (typeof store.setGatewayConfig === 'function') {
+        await store.setGatewayConfig({ gatewayUrl: cleanUrl, updatedAt: new Date().toISOString() });
+      }
+      return jsonResponse(200, { ok: true, gatewayUrl: cleanUrl });
     }
 
     const cookies = parseCookies(readHeader(headers, 'cookie'));

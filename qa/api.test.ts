@@ -245,4 +245,61 @@ test('Netlify Web API handler and Blobs store handle auth, rewritten paths, proj
   assert.equal((await callApi('/api/projects', { method: 'DELETE', headers: { Cookie: cookieClara } })).status, 200);
   assert.deepEqual((await (await callApi('/api/projects', { headers: { Cookie: cookieClara } })).json()).projects, []);
   assert.deepEqual(await (await callApi('/api/favorites', { headers: { Cookie: cookieClara } })).json(), { favorites: [] });
+
+  // Gateway configuration route: SSRF guard + live admin secret verification + Blobs persistence
+  const initialGw = await callApi('/api/gateway/config');
+  assert.equal(initialGw.status, 200);
+  assert.deepEqual(await initialGw.json(), { gatewayUrl: null, source: 'none' });
+
+  const ssrfGw = await callApi('/api/gateway/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://stickerwave.netlify.app' },
+    body: JSON.stringify({ gatewayUrl: 'https://169.254.169.254', adminSecret: 'admin-secret-123' }),
+  });
+  assert.equal(ssrfGw.status, 400);
+
+  const nonHttpsOnProd = await callApi('/api/gateway/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://stickerwave.netlify.app' },
+    body: JSON.stringify({ gatewayUrl: 'http://127.0.0.1:3001', adminSecret: 'admin-secret-123' }),
+  });
+  assert.equal(nonHttpsOnProd.status, 400);
+
+  // Local HTTP gateway verification with live mock auth verifier
+  const { createServer } = await import('node:http');
+  const mockGw = createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/api/v1/admin/whatsapp/auth/verify') {
+      const ok = req.headers.authorization === 'Bearer valid-admin-secret';
+      res.writeHead(ok ? 200 : 401, { 'Content-Type': 'application/json' }).end(JSON.stringify({ authenticated: ok }));
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  mockGw.listen(0, '127.0.0.1');
+  await once(mockGw, 'listening');
+  try {
+    const mockOrigin = `http://127.0.0.1:${mockGw.address().port}`;
+    const callLocalApi = (path: string, init: RequestInit = {}) =>
+      handleWebApiRequest(new Request(`http://127.0.0.1:4173${path}`, init), store);
+
+    const badSecretPut = await callLocalApi('/api/gateway/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Origin: 'http://127.0.0.1:4173' },
+      body: JSON.stringify({ gatewayUrl: mockOrigin, adminSecret: 'wrong-secret' }),
+    });
+    assert.equal(badSecretPut.status, 401);
+
+    const goodSecretPut = await callLocalApi('/api/gateway/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Origin: 'http://127.0.0.1:4173' },
+      body: JSON.stringify({ gatewayUrl: mockOrigin, adminSecret: 'valid-admin-secret' }),
+    });
+    assert.equal(goodSecretPut.status, 200);
+    assert.deepEqual(await (await callLocalApi('/api/gateway/config')).json(), {
+      gatewayUrl: mockOrigin,
+      source: 'store',
+    });
+  } finally {
+    await new Promise(resolve => mockGw.close(resolve));
+  }
 });

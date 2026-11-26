@@ -185,6 +185,24 @@ try {
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Admin mobile width fit');
   console.log('PASS mobile responsive layout without horizontal overflow');
 
+  // 3) Verify unconfigured gateway / 404 SPA HTML response is handled cleanly without triggering POST /phones/validate 404
+  const validateRequests = [];
+  await page.route('**/gateway/**', route => {
+    const reqUrl = route.request().url();
+    if (reqUrl.includes('/phones/validate')) validateRequests.push(reqUrl);
+    return route.fulfill({ status: 404, contentType: 'text/html', body: '<!doctype html><html><body>Not found</body></html>' });
+  });
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await page.goto(`${origin}/studio`);
+  await page.getByRole('button', { name: 'Editar um exemplo' }).click();
+  await page.getByRole('button', { name: 'Enviar no WhatsApp' }).first().click();
+  const unconfDialog = page.getByRole('dialog', { name: /Enviar figurinha sonora/i });
+  await unconfDialog.getByText(/Gateway não configurado/i).waitFor();
+  await unconfDialog.getByRole('link', { name: /Configurar Gateway/i }).waitFor();
+  assert.equal(await unconfDialog.getByRole('button', { name: /Validar número/i }).isEnabled(), false);
+  assert.equal(validateRequests.length, 0);
+  console.log('PASS unconfigured gateway state disables validate and surfaces setup/fallback cleanly');
+
   assert.deepEqual(pageErrors, []);
 } finally {
   await browser?.close();

@@ -21,7 +21,7 @@ import {
   Volume2,
 } from 'lucide-react';
 import { audioTracks, visualLayers, type Project, type StoredAsset } from '../core/project';
-import { useApp } from '../app/context';
+import { Link, useApp } from '../app/context';
 import { Modal, Notice } from '../app/shared';
 import {
   cancelStickerJob,
@@ -66,6 +66,7 @@ export function SendToWhatsAppModal({
   const [manualCode, setManualCode] = useState('');
   const [capabilities, setCapabilities] = useState<GatewayCapabilitiesResponse | null>(null);
   const [ready, setReady] = useState<GatewayReadyResponse | null>(null);
+  const [gatewayState, setGatewayState] = useState<'checking' | 'online' | 'unconfigured' | 'offline'>('checking');
   const [checkingPhone, setCheckingPhone] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [job, setJob] = useState<StickerSendJobSummary | null>(null);
@@ -82,19 +83,47 @@ export function SendToWhatsAppModal({
   const renderedCacheRef = useRef<Awaited<ReturnType<typeof renderProjectMediaForGateway>> | null>(null);
   const idempKeyRef = useRef<string>('');
 
+  async function checkGatewayConnection() {
+    setGatewayState('checking');
+    try {
+      const [r, c] = await Promise.all([fetchGatewayReady(), fetchGatewayCapabilities().catch(() => null)]);
+      setReady(r);
+      setCapabilities(c);
+      setGatewayState('online');
+    } catch (err) {
+      setReady(null);
+      setCapabilities(null);
+      const isNotFound = err instanceof GatewayClientError && (err.code === 'GW-4044' || err.status === 404);
+      setGatewayState(isNotFound ? 'unconfigured' : 'offline');
+    }
+  }
+
   useEffect(() => {
     let active = true;
     const previewCtrl = new AbortController();
     let visualUrl: string | null = null;
     let audioUrl: string | null = null;
 
-    void Promise.all([fetchGatewayReady().catch(() => null), fetchGatewayCapabilities().catch(() => null)]).then(
-      ([r, c]) => {
-        if (!active) return;
-        setReady(r);
-        setCapabilities(c);
-      },
-    );
+    void Promise.all([
+      fetchGatewayReady().then(
+        (r) => ({ ok: true as const, data: r }),
+        (err) => ({ ok: false as const, err }),
+      ),
+      fetchGatewayCapabilities().catch(() => null),
+    ]).then(([readyResult, caps]) => {
+      if (!active) return;
+      if (readyResult.ok) {
+        setReady(readyResult.data);
+        setCapabilities(caps);
+        setGatewayState('online');
+      } else {
+        setReady(null);
+        setCapabilities(null);
+        const e = readyResult.err;
+        const isNotFound = e instanceof GatewayClientError && (e.code === 'GW-4044' || e.status === 404);
+        setGatewayState(isNotFound ? 'unconfigured' : 'offline');
+      }
+    });
 
     void renderProjectMediaForGateway(project, assets, previewCtrl.signal)
       .then((rendered) => {
@@ -281,7 +310,8 @@ export function SendToWhatsAppModal({
   }
 
   const audioTrackCount = audioTracks(project).filter((t) => !t.style.muted).length;
-  const botOffline = Boolean(ready && (!ready.ready || !ready.whatsappConnected));
+  const gatewayMissing = gatewayState === 'unconfigured' || gatewayState === 'offline';
+  const botOffline = Boolean(gatewayState === 'online' && ready && (!ready.ready || !ready.whatsappConnected));
   const featureDisabled = capabilities !== null && !capabilities.soundStickersEnabled;
   const canCancel = Boolean(
     job && !TERMINAL_JOB_STATUSES.has(job.status) && job.status !== 'UPLOADING' && job.status !== 'SENDING',
@@ -312,10 +342,19 @@ export function SendToWhatsAppModal({
               <Volume2 size={15} />
               {project.name} · {audioTrackCount} {audioTrackCount === 1 ? 'faixa' : 'faixas'}
             </span>
-            {ready && (
+            {gatewayState === 'online' && ready && (
               <span className={`wa-badge wa-badge-${ready.whatsappConnected ? 'ok' : 'warn'}`}>
                 {ready.whatsappConnected ? copy.waSendBotOnline : copy.waSendBotOfflineBadge}
               </span>
+            )}
+            {gatewayState === 'checking' && (
+              <span className="wa-badge wa-badge-warn">
+                <Loader2 size={13} className="spin" />
+                {copy.waSendCheckingGateway}
+              </span>
+            )}
+            {gatewayMissing && (
+              <span className="wa-badge wa-badge-err">{copy.waSendGatewayMissingBadge}</span>
             )}
           </div>
           {previewUrls.audio && (
@@ -329,12 +368,25 @@ export function SendToWhatsAppModal({
 
       <p className="inspector-note">{copy.waSendPrivacyNote}</p>
 
-      {(botOffline || featureDisabled) && (
+      {(gatewayMissing || botOffline || featureDisabled) && (
         <Notice error>
-          {featureDisabled
-            ? copy.waSendFeatureDisabled
-            : copy.waSendBotNotReady}
-          <div style={{ marginTop: 8 }}>
+          <div>
+            {featureDisabled
+              ? copy.waSendFeatureDisabled
+              : gatewayState === 'unconfigured'
+                ? copy.waSendGatewayNotConfigured
+                : gatewayState === 'offline'
+                  ? copy.waGatewayOffline
+                  : copy.waSendBotNotReady}
+          </div>
+          <div className="button-row" style={{ marginTop: 8 }}>
+            <button type="button" className="button button-small button-outline" onClick={() => void checkGatewayConnection()}>
+              <RefreshCw size={14} />
+              {copy.retry}
+            </button>
+            <Link className="button button-small button-outline" href="/whatsapp" onClick={close}>
+              {copy.waSendOpenAdminSetup}
+            </Link>
             <button type="button" className="button button-small button-outline" onClick={onFallbackLocalExport}>
               {copy.waSendUseLocalExport}
             </button>
@@ -348,6 +400,7 @@ export function SendToWhatsAppModal({
         <label className="auth-field">
           <span>{copy.waSendCountryLabel}</span>
           <select
+            disabled={gatewayMissing}
             value={dialPrefix}
             onChange={(e) => {
               const dial = e.target.value;
@@ -372,6 +425,7 @@ export function SendToWhatsAppModal({
             <input
               type="tel"
               inputMode="tel"
+              disabled={gatewayMissing}
               placeholder="11 99999-8888"
               value={rawPhone}
               onChange={(e) => {
@@ -385,7 +439,7 @@ export function SendToWhatsAppModal({
             <button
               type="button"
               className="button button-outline"
-              disabled={checkingPhone || !rawPhone.trim()}
+              disabled={gatewayMissing || gatewayState === 'checking' || checkingPhone || !rawPhone.trim()}
               onClick={() => void handleValidateAndCheckAuth()}
             >
               {checkingPhone ? <Loader2 size={15} className="spin" /> : <ShieldCheck size={15} />}
@@ -491,6 +545,7 @@ export function SendToWhatsAppModal({
           type="button"
           className="button button-green"
           disabled={
+            gatewayMissing ||
             submitting ||
             !validation?.valid ||
             !authorized ||

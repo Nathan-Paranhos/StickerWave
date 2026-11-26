@@ -20,11 +20,126 @@ import { Composition } from './composition';
 import { mixAudio } from './mix';
 
 const DEFAULT_GATEWAY_BASE = '/gateway';
+const GW_URL_OVERRIDE_KEY = 'sw_gw_url';
+
+let resolvedGatewayCache: string | null = null;
+let gatewayResolveInFlight: Promise<string> | null = null;
+
+function sanitizeGatewayBaseUrl(raw: string | null | undefined): string | null {
+  const trimmed = (raw || '').trim().replace(/\/+$/, '');
+  if (!trimmed) return null;
+  if (trimmed === '/gateway') return '/gateway';
+  try {
+    const parsed = new URL(trimmed);
+    const isLocalHttp =
+      parsed.protocol === 'http:' && (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost');
+    if (parsed.protocol !== 'https:' && !isLocalHttp) return null;
+    return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`;
+  } catch {
+    return null;
+  }
+}
+
+export function getLocalGatewayUrlOverride(): string | null {
+  try {
+    return sanitizeGatewayBaseUrl(localStorage.getItem(GW_URL_OVERRIDE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+export function setLocalGatewayUrlOverride(url: string | null): string | null {
+  const clean = sanitizeGatewayBaseUrl(url);
+  resolvedGatewayCache = null;
+  try {
+    if (clean && clean !== '/gateway') localStorage.setItem(GW_URL_OVERRIDE_KEY, clean);
+    else localStorage.removeItem(GW_URL_OVERRIDE_KEY);
+  } catch {
+    // storage optional
+  }
+  return clean;
+}
 
 export function getGatewayBaseUrl(): string {
-  const configured = (import.meta.env.VITE_WHATSAPP_GATEWAY_URL as string | undefined)?.trim();
-  const base = configured || DEFAULT_GATEWAY_BASE;
-  return base.replace(/\/+$/, '');
+  const envUrl = sanitizeGatewayBaseUrl(import.meta.env.VITE_WHATSAPP_GATEWAY_URL as string | undefined);
+  if (envUrl) return envUrl;
+  const localOverride = getLocalGatewayUrlOverride();
+  if (localOverride) return localOverride;
+  return resolvedGatewayCache || DEFAULT_GATEWAY_BASE;
+}
+
+export async function resolveGatewayBaseUrl(forceRefresh = false): Promise<string> {
+  const envUrl = sanitizeGatewayBaseUrl(import.meta.env.VITE_WHATSAPP_GATEWAY_URL as string | undefined);
+  if (envUrl) {
+    resolvedGatewayCache = envUrl;
+    return envUrl;
+  }
+  const localOverride = getLocalGatewayUrlOverride();
+  if (localOverride) {
+    resolvedGatewayCache = localOverride;
+    return localOverride;
+  }
+  if (!forceRefresh && resolvedGatewayCache) {
+    return resolvedGatewayCache;
+  }
+  if (!forceRefresh && gatewayResolveInFlight) {
+    return gatewayResolveInFlight;
+  }
+
+  gatewayResolveInFlight = (async () => {
+    try {
+      const res = await fetch('/api/gateway/config', { credentials: 'same-origin' });
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.toLowerCase().includes('application/json')) {
+        const data = (await res.json().catch(() => null)) as { gatewayUrl?: string | null } | null;
+        const remote = sanitizeGatewayBaseUrl(data?.gatewayUrl);
+        if (remote) {
+          resolvedGatewayCache = remote;
+          return remote;
+        }
+      }
+    } catch {
+      // fallback to /gateway
+    }
+    resolvedGatewayCache = DEFAULT_GATEWAY_BASE;
+    return DEFAULT_GATEWAY_BASE;
+  })().finally(() => {
+    gatewayResolveInFlight = null;
+  });
+
+  return gatewayResolveInFlight;
+}
+
+export async function fetchSiteGatewayConfig(): Promise<{ gatewayUrl: string | null; source: string }> {
+  try {
+    const res = await fetch('/api/gateway/config', { credentials: 'same-origin' });
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.toLowerCase().includes('application/json')) {
+      return (await res.json()) as { gatewayUrl: string | null; source: string };
+    }
+  } catch {
+    // offline/unavailable
+  }
+  return { gatewayUrl: null, source: 'none' };
+}
+
+export async function publishPublicGatewayUrl(gatewayUrl: string | null, adminSecret: string): Promise<string | null> {
+  const res = await fetch('/api/gateway/config', {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gatewayUrl, adminSecret }),
+  });
+  const payload = (await res.json().catch(() => null)) as { ok?: boolean; gatewayUrl?: string | null; error?: string; code?: string } | null;
+  if (!res.ok) {
+    throw new GatewayClientError(
+      res.status,
+      payload?.code || `GW-${res.status}`,
+      payload?.error || 'Não foi possível publicar a URL do Gateway no site.',
+    );
+  }
+  resolvedGatewayCache = sanitizeGatewayBaseUrl(payload?.gatewayUrl) || DEFAULT_GATEWAY_BASE;
+  return payload?.gatewayUrl ?? null;
 }
 
 function getOptionalPublicToken(): string {
@@ -44,7 +159,8 @@ export class GatewayClientError extends Error {
 }
 
 async function gwFetch<T>(path: string, init: RequestInit = {}, adminSecret?: string): Promise<T> {
-  const url = `${getGatewayBaseUrl()}${path}`;
+  const baseUrl = await resolveGatewayBaseUrl();
+  const url = `${baseUrl}${path}`;
   const headers = new Headers(init.headers ?? {});
   if (adminSecret) {
     headers.set('Authorization', `Bearer ${adminSecret}`);
@@ -64,6 +180,15 @@ async function gwFetch<T>(path: string, init: RequestInit = {}, adminSecret?: st
   const isJson = contentType.toLowerCase().includes('application/json');
   const payload = isJson ? ((await response.json().catch(() => null)) as Record<string, unknown> | null) : null;
 
+  if (!isJson && (response.status === 404 || response.status === 405 || response.status === 200)) {
+    throw new GatewayClientError(
+      404,
+      'GW-4044',
+      'Nenhum servidor StickerWave WhatsApp Gateway conectado nesta URL (/gateway não configurado).',
+      true,
+    );
+  }
+
   if (!response.ok) {
     const code = typeof payload?.code === 'string' ? payload.code : `GW-${response.status}`;
     const msg = typeof payload?.message === 'string' ? payload.message : `Erro no gateway (${response.status}).`;
@@ -81,13 +206,27 @@ export function fetchGatewayHealth(): Promise<GatewayHealthResponse> {
   return gwFetch<GatewayHealthResponse>('/health');
 }
 
-export function fetchGatewayReady(): Promise<GatewayReadyResponse> {
-  const url = `${getGatewayBaseUrl()}/ready`;
-  return fetch(url).then(async (res) => {
-    const body = (await res.json().catch(() => null)) as GatewayReadyResponse | null;
-    if (!body) throw new GatewayClientError(res.status, 'GW-5030', 'Gateway readiness check failed.', true);
-    return body;
-  });
+export async function fetchGatewayReady(): Promise<GatewayReadyResponse> {
+  const baseUrl = await resolveGatewayBaseUrl();
+  const url = `${baseUrl}/ready`;
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch {
+    throw new GatewayClientError(0, 'GW-0000', 'Não foi possível conectar ao StickerWave WhatsApp Gateway.', true);
+  }
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.toLowerCase().includes('application/json')) {
+    throw new GatewayClientError(
+      404,
+      'GW-4044',
+      'Nenhum servidor StickerWave WhatsApp Gateway conectado nesta URL.',
+      true,
+    );
+  }
+  const body = (await res.json().catch(() => null)) as GatewayReadyResponse | null;
+  if (!body) throw new GatewayClientError(res.status, 'GW-5030', 'Gateway readiness check failed.', true);
+  return body;
 }
 
 export function fetchGatewayCapabilities(): Promise<GatewayCapabilitiesResponse> {
@@ -278,12 +417,14 @@ export function subscribeWhatsAppAdminEvents(
   onError: (err: Error) => void,
   signal: AbortSignal,
 ): void {
-  void consumeSseStream<WhatsAppConnectionEvent>(
-    `${getGatewayBaseUrl()}/api/v1/admin/whatsapp/events`,
-    { Authorization: `Bearer ${adminSecret}` },
-    (_name, payload) => onEvent(payload),
-    onError,
-    signal,
+  void resolveGatewayBaseUrl().then((baseUrl) =>
+    consumeSseStream<WhatsAppConnectionEvent>(
+      `${baseUrl}/api/v1/admin/whatsapp/events`,
+      { Authorization: `Bearer ${adminSecret}` },
+      (_name, payload) => onEvent(payload),
+      onError,
+      signal,
+    ),
   );
 }
 
@@ -297,12 +438,14 @@ export function subscribeStickerJobEvents(
   const headers: Record<string, string> = {};
   if (token) headers['X-Gateway-Token'] = token;
 
-  void consumeSseStream<StickerJobEvent>(
-    `${getGatewayBaseUrl()}/api/v1/stickers/jobs/${encodeURIComponent(jobId)}/events`,
-    headers,
-    (_name, payload) => onEvent(payload),
-    onError,
-    signal,
+  void resolveGatewayBaseUrl().then((baseUrl) =>
+    consumeSseStream<StickerJobEvent>(
+      `${baseUrl}/api/v1/stickers/jobs/${encodeURIComponent(jobId)}/events`,
+      headers,
+      (_name, payload) => onEvent(payload),
+      onError,
+      signal,
+    ),
   );
 }
 
