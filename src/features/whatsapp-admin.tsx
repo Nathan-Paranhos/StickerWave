@@ -121,7 +121,6 @@ export function WhatsAppAdminPage() {
     void resolveGatewayBaseUrl().then((resolved) => {
       if (!mounted) return;
       setGatewayUrlInput(resolved);
-      if (resolved.startsWith('https://')) setPublishUrlToSite(true);
     });
 
     const initial = readStoredAdminSecret();
@@ -252,9 +251,7 @@ export function WhatsAppAdminPage() {
                 type="text"
                 value={gatewayUrlInput}
                 onChange={(e) => {
-                  const val = e.target.value;
-                  setGatewayUrlInput(val);
-                  if (val.trim().startsWith('https://')) setPublishUrlToSite(true);
+                  setGatewayUrlInput(e.target.value);
                 }}
                 placeholder="/gateway ou https://seu-gateway.onrender.com"
               />
@@ -330,6 +327,11 @@ export function WhatsAppAdminPage() {
       </div>
 
       {opError && <Notice error>{opError}</Notice>}
+      {capabilities && capabilities.whatsappBotEnabled === false && (
+        <Notice>
+          <strong>{copy.waAdminCloudModeTitle}</strong> — {copy.waAdminCloudModeBody}
+        </Notice>
+      )}
 
       <div className="wa-admin-grid">
         <article className="wa-card">
@@ -372,7 +374,7 @@ export function WhatsAppAdminPage() {
               <button
                 type="button"
                 className="button button-green"
-                disabled={actionBusy}
+                disabled={actionBusy || capabilities?.whatsappBotEnabled === false}
                 onClick={() => void runConnectionAction((s) => connectWhatsAppBot(s, false))}
               >
                 <QrCode size={17} />
@@ -382,7 +384,7 @@ export function WhatsAppAdminPage() {
             <button
               type="button"
               className="button button-outline"
-              disabled={actionBusy}
+              disabled={actionBusy || capabilities?.whatsappBotEnabled === false}
               onClick={() => void runConnectionAction((s) => reconnectWhatsAppBot(s))}
             >
               <RefreshCw size={16} />
@@ -391,7 +393,7 @@ export function WhatsAppAdminPage() {
             <button
               type="button"
               className="button button-outline"
-              disabled={actionBusy}
+              disabled={actionBusy || capabilities?.whatsappBotEnabled === false}
               onClick={() => void runConnectionAction((s) => connectWhatsAppBot(s, true))}
             >
               <QrCode size={16} />

@@ -103,6 +103,7 @@ test('Gateway end-to-end flow: QR connect, encrypted session, WA opt-in, sound s
       dbPath: path.join(workDir, 'gateway.db'),
       allowedOrigins: ['http://127.0.0.1:5173'],
       enableSoundStickers: true,
+      enableWaBot: true,
       autoAuthorizeDevNumbers: new Set<string>(),
       rateLimitMaxRequests: 200,
     },
@@ -334,6 +335,7 @@ test('Queue cancels queued job prior to sending without relaying', async (t) => 
       dataDir: workDir,
       sessionDir: path.join(workDir, 'session'),
       dbPath: path.join(workDir, 'cancel.db'),
+      enableWaBot: true,
       allowedOrigins: ['*'],
     },
     { skipStartupReconnect: true, socketFactory: () => sock },
@@ -387,7 +389,7 @@ test('Encrypted WhatsApp session survives server restart and resumes connection 
 
   const socks1: MockBaileysSocket[] = [];
   const rt1 = createGatewayRuntime(
-    { host: '127.0.0.1', port: 0, sessionSecret, dataDir: workDir, sessionDir, dbPath, allowedOrigins: ['*'] },
+    { host: '127.0.0.1', port: 0, sessionSecret, dataDir: workDir, sessionDir, dbPath, enableWaBot: true, allowedOrigins: ['*'] },
     { skipStartupReconnect: true, socketFactory: () => { const s = new MockBaileysSocket(); socks1.push(s); return s; } },
   );
   await rt1.start();
@@ -400,7 +402,7 @@ test('Encrypted WhatsApp session survives server restart and resumes connection 
 
   const socks2: MockBaileysSocket[] = [];
   const rt2 = createGatewayRuntime(
-    { host: '127.0.0.1', port: 0, sessionSecret, dataDir: workDir, sessionDir, dbPath, allowedOrigins: ['*'] },
+    { host: '127.0.0.1', port: 0, sessionSecret, dataDir: workDir, sessionDir, dbPath, enableWaBot: true, allowedOrigins: ['*'] },
     { skipStartupReconnect: false, socketFactory: () => { const s = new MockBaileysSocket(); socks2.push(s); return s; } },
   );
   t.after(async () => {

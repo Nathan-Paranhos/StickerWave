@@ -8,6 +8,7 @@ export interface GatewayConfig {
   publicBaseUrl: string;
   allowedOrigins: string[];
   enableSoundStickers: boolean;
+  enableWaBot: boolean;
   adminSecret: string;
   publicToken: string;
   sessionSecret: string;
@@ -96,6 +97,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
       .map((origin) => origin.trim())
       .filter(Boolean),
     enableSoundStickers: parseFlag(env.ENABLE_SOUND_STICKERS, true),
+    enableWaBot: parseFlag(env.ENABLE_WA_BOT, false),
     adminSecret: env.GATEWAY_ADMIN_SECRET || 'dev-admin-secret-change-in-prod',
     publicToken: (env.GATEWAY_PUBLIC_TOKEN || '').trim(),
     sessionSecret: env.GATEWAY_SESSION_SECRET || 'dev-session-secret-change-in-prod-32b',

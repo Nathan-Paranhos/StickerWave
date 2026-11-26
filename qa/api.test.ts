@@ -299,6 +299,21 @@ test('Netlify Web API handler and Blobs store handle auth, rewritten paths, proj
       gatewayUrl: mockOrigin,
       source: 'store',
     });
+
+    // When WHATSAPP_GATEWAY_URL env is configured, PUT /api/gateway/config rejects tampering with 403
+    const prevEnvUrl = process.env.WHATSAPP_GATEWAY_URL;
+    process.env.WHATSAPP_GATEWAY_URL = 'https://stickerwave.onrender.com';
+    try {
+      const lockedPut = await callLocalApi('/api/gateway/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://127.0.0.1:4173' },
+        body: JSON.stringify({ gatewayUrl: mockOrigin, adminSecret: 'valid-admin-secret' }),
+      });
+      assert.equal(lockedPut.status, 403);
+    } finally {
+      if (prevEnvUrl === undefined) delete process.env.WHATSAPP_GATEWAY_URL;
+      else process.env.WHATSAPP_GATEWAY_URL = prevEnvUrl;
+    }
   } finally {
     await new Promise(resolve => mockGw.close(resolve));
   }

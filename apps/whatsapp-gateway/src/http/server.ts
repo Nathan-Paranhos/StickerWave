@@ -1,7 +1,9 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import {
+  CLOUD_MEDIA_FORMATS,
   GATEWAY_ERROR_CODES,
   STICKER_LIMITS_PROFILE,
+  type CloudMediaFormat,
   type GatewayCapabilitiesResponse,
   type GatewayHealthResponse,
   type GatewayReadyResponse,
@@ -177,19 +179,20 @@ export function createGatewayRuntime(
       const sqliteReady = db.ping();
       const protocolReady = protocol.capability.mode !== 'unsupported';
       const waSnap = wa.getSnapshot();
-      const whatsappConnected = waSnap.status === 'CONNECTED';
+      const whatsappConnected = config.enableWaBot && waSnap.status === 'CONNECTED';
       const reasons: string[] = [];
       if (!ff.ready) reasons.push(ff.error || 'FFmpeg indisponível');
       if (!sqliteReady) reasons.push('SQLite indisponível');
-      if (!protocolReady) reasons.push('Protocolo Baileys incompatível');
-      if (!whatsappConnected) reasons.push(`WhatsApp bot em estado ${waSnap.status}`);
+      if (config.enableWaBot && !protocolReady) reasons.push('Protocolo Baileys incompatível');
+      if (config.enableWaBot && !whatsappConnected) reasons.push(`WhatsApp bot em estado ${waSnap.status}`);
 
-      const ready = ff.ready && sqliteReady && protocolReady;
+      const ready = ff.ready && sqliteReady && (!config.enableWaBot || protocolReady);
       const body: GatewayReadyResponse = {
         ready,
         ffmpegReady: ff.ready,
         sqliteReady,
         protocolReady,
+        whatsappBotEnabled: config.enableWaBot,
         whatsappConnected,
         whatsappStatus: waSnap.status,
         soundStickersEnabled: config.enableSoundStickers,
@@ -207,11 +210,15 @@ export function createGatewayRuntime(
     if (method === 'GET' && pathname === '/api/v1/capabilities') {
       const ff = await ffmpeg.checkCapabilities();
       const body: GatewayCapabilitiesResponse = {
+        cloudMediaEnabled: ff.ready,
+        cloudFormats: [...CLOUD_MEDIA_FORMATS],
+        whatsappBotEnabled: config.enableWaBot,
         soundStickersEnabled: config.enableSoundStickers,
         ffmpegVersion: ff.versionLine,
         encoders: {
           libwebp: ff.encoders.libwebp,
           libopus: ff.encoders.libopus || ff.encoders.opusExperimental,
+          libx264: ff.encoders.libx264,
         },
         baileysVersion: protocol.capability.baileysVersion,
         protocolField26Supported: protocol.capability.mode !== 'unsupported',
@@ -264,12 +271,20 @@ export function createGatewayRuntime(
         return;
       }
       if (method === 'POST' && adminSubPath === '/whatsapp/connect') {
+        if (!config.enableWaBot) {
+          sendError(res, 503, GATEWAY_ERROR_CODES.SOUND_STICKERS_DISABLED, 'Bot WhatsApp desativado neste servidor (modo Cloud Media ativo).');
+          return;
+        }
         const body = await readJsonBody<{ forceNewQr?: boolean }>(req).catch(() => ({} as { forceNewQr?: boolean }));
         const snap = await wa.connect(Boolean(body.forceNewQr));
         sendJson(res, 200, snap);
         return;
       }
       if (method === 'POST' && adminSubPath === '/whatsapp/reconnect') {
+        if (!config.enableWaBot) {
+          sendError(res, 503, GATEWAY_ERROR_CODES.SOUND_STICKERS_DISABLED, 'Bot WhatsApp desativado neste servidor (modo Cloud Media ativo).');
+          return;
+        }
         const snap = await wa.connect(false);
         sendJson(res, 200, snap);
         return;
@@ -321,6 +336,74 @@ export function createGatewayRuntime(
       return;
     }
 
+    // --- Cloud Media Processing Endpoint (public via CORS + rate limiter; no WhatsApp bot needed) ---
+    if (method === 'POST' && pathname === '/api/v1/media/convert') {
+      const contentType = String(req.headers['content-type'] || '');
+      if (!contentType.toLowerCase().includes('multipart/form-data')) {
+        sendError(res, 415, GATEWAY_ERROR_CODES.INVALID_MEDIA, 'Envie a composição via multipart/form-data.');
+        return;
+      }
+
+      try {
+        const maxMultipartBytes = config.maxVisualUploadBytes + config.maxAudioUploadBytes + 512 * 1024;
+        const rawBody = await readRawBody(req, maxMultipartBytes);
+        const { fields, files } = parseMultipartBody(rawBody, contentType);
+
+        if (fields.visualUrl || fields.audioUrl) {
+          sendError(
+            res,
+            400,
+            GATEWAY_ERROR_CODES.INVALID_MEDIA,
+            'URLs externas não são aceitas diretamente pelo servidor; envie os bytes da mídia.',
+          );
+          return;
+        }
+
+        const requestedFormat = (fields.format || 'webp').trim() as CloudMediaFormat;
+        if (!CLOUD_MEDIA_FORMATS.includes(requestedFormat)) {
+          sendError(res, 400, GATEWAY_ERROR_CODES.INVALID_COMPOSITION, `Formato não suportado: ${requestedFormat}`);
+          return;
+        }
+
+        let shapeOptions: Partial<StickerShapeOptions> | undefined;
+        if (fields.shapeOptions) {
+          shapeOptions = shapeOptionsSchema.parse(JSON.parse(fields.shapeOptions));
+        }
+        let audioOptions: StickerAudioOptions | undefined;
+        if (fields.audioOptions) {
+          audioOptions = audioOptionsSchema.parse(JSON.parse(fields.audioOptions));
+        }
+
+        const rendered = await pipeline.renderCloudMedia({
+          format: requestedFormat,
+          visualBytes: files.visual?.data ?? null,
+          audioBytes: files.audio?.data ?? null,
+          title: fields.title,
+          shapeOptions,
+          audioOptions,
+        });
+
+        res.writeHead(200, {
+          'Content-Type': rendered.mimeType,
+          'Content-Length': rendered.buffer.byteLength,
+          'Content-Disposition': `attachment; filename="stickerwave.${rendered.extension}"`,
+          'X-Sticker-Animated': rendered.isAnimated ? 'true' : 'false',
+          'X-Sticker-Duration-Ms': String(rendered.durationMs),
+          'X-Sticker-Bytes': String(rendered.buffer.byteLength),
+          'X-Sticker-Cloud-Engine': 'stickerwave-ffmpeg',
+        });
+        res.end(rendered.buffer);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.startsWith('PAYLOAD_TOO_LARGE')) {
+          sendError(res, 413, GATEWAY_ERROR_CODES.MEDIA_TOO_LARGE, 'Payload de mídia excedeu o limite máximo permitido.');
+          return;
+        }
+        sendError(res, 400, GATEWAY_ERROR_CODES.INVALID_COMPOSITION, `Falha no processamento Cloud FFmpeg: ${msg}`);
+      }
+      return;
+    }
+
     // --- Phone validation & recipient opt-in authorization ---
     if (method === 'POST' && pathname === '/api/v1/phones/validate') {
       try {
@@ -333,6 +416,10 @@ export function createGatewayRuntime(
     }
 
     if (method === 'POST' && pathname === '/api/v1/recipients/authorization-request') {
+      if (!config.enableWaBot) {
+        sendError(res, 503, GATEWAY_ERROR_CODES.SOUND_STICKERS_DISABLED, 'Bot WhatsApp desativado neste servidor (modo Cloud Media ativo).');
+        return;
+      }
       try {
         const parsed = phoneSchema.parse(await readJsonBody(req));
         const { validation, challenge } = authService.requestAuthorizationChallenge(parsed.phone);
@@ -392,6 +479,10 @@ export function createGatewayRuntime(
 
     // --- Sound Sticker Send & Job Endpoints ---
     if (method === 'POST' && pathname === '/api/v1/stickers/send') {
+      if (!config.enableWaBot) {
+        sendError(res, 503, GATEWAY_ERROR_CODES.SOUND_STICKERS_DISABLED, 'Bot WhatsApp desativado neste servidor (modo Cloud Media ativo).');
+        return;
+      }
       const contentType = String(req.headers['content-type'] || '');
       if (!contentType.toLowerCase().includes('multipart/form-data')) {
         sendError(res, 415, GATEWAY_ERROR_CODES.INVALID_MEDIA, 'Envie a composição via multipart/form-data.');
@@ -532,7 +623,7 @@ export function createGatewayRuntime(
     jobService,
     server,
     async start() {
-      if (!deps.skipStartupReconnect) {
+      if (config.enableWaBot && !deps.skipStartupReconnect) {
         await wa.init();
       }
       await new Promise<void>((resolve) => {

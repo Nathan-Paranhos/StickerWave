@@ -57,6 +57,7 @@ const gateway = createGatewayRuntime(
     dbPath: join(workDir, 'qa.db'),
     allowedOrigins: ['*'],
     enableSoundStickers: true,
+    enableWaBot: true,
     rateLimitMaxRequests: 200,
   },
   {
@@ -202,6 +203,64 @@ try {
   assert.equal(await unconfDialog.getByRole('button', { name: /Validar número/i }).isEnabled(), false);
   assert.equal(validateRequests.length, 0);
   console.log('PASS unconfigured gateway state disables validate and surfaces setup/fallback cleanly');
+
+  // 4) Cloud Media only mode (ENABLE_WA_BOT=false): Studio opens Cloud FFmpeg export directly without requesting a bot phone
+  await page.unroute('**/gateway/**');
+  const cloudDir = await mkdtemp(join(tmpdir(), 'stickerwave-cloud-qa-'));
+  const cloudWebDir = join(cloudDir, 'webdb');
+  await import('node:fs/promises').then(fs => fs.mkdir(cloudWebDir, { recursive: true }));
+  const cloudGw = createGatewayRuntime(
+    {
+      host: '127.0.0.1',
+      port: 0,
+      dataDir: cloudDir,
+      sessionDir: join(cloudDir, 'session'),
+      dbPath: join(cloudDir, 'cloud.db'),
+      allowedOrigins: ['*'],
+      enableWaBot: false,
+      rateLimitMaxRequests: 100,
+    },
+    { skipStartupReconnect: true },
+  );
+  const { port: cloudPort } = await cloudGw.start();
+  const cloudWeb = createDistributionServer({
+    databaseUrl: `file:${join(cloudWebDir, 'web.db').replace(/\\/g, '/')}`,
+    gatewayUrl: `http://127.0.0.1:${cloudPort}`,
+  });
+  cloudWeb.listen(0, '127.0.0.1');
+  await once(cloudWeb, 'listening');
+  const cloudOrigin = `http://127.0.0.1:${cloudWeb.address().port}`;
+  try {
+    let cloudConvertCalled = false;
+    page.on('request', req => {
+      if (req.url().includes('/api/v1/media/convert')) cloudConvertCalled = true;
+    });
+    await page.goto(`${cloudOrigin}/auth`);
+    await page.getByLabel('Nome').fill('QA Cloud');
+    await page.getByLabel('E-mail').fill('qa-cloud@example.com');
+    await page.getByLabel('Senha', { exact: true }).fill('sticker123');
+    await page.getByLabel('Confirmar senha', { exact: true }).fill('sticker123');
+    await page.getByRole('button', { name: 'Criar conta grátis' }).last().click();
+
+    await page.getByRole('button', { name: 'Editar um exemplo' }).click();
+    const cloudBtn = page.getByRole('button', { name: /Exportar p\/ WhatsApp \(Cloud\)/i }).first();
+    await cloudBtn.waitFor();
+    await cloudBtn.click();
+
+    const exportModal = page.getByRole('dialog', { name: 'Exportar criação' });
+    await exportModal.waitFor();
+    await exportModal.getByText(/Cloud FFmpeg ativo/i).waitFor();
+    await exportModal.getByRole('button', { name: /Pacote \.wastickers/i }).click();
+    await exportModal.getByText(/Arquivo pronto/i).waitFor({ timeout: 45000 });
+    await exportModal.getByRole('link', { name: /Baixar arquivo/i }).waitFor();
+    assert.equal(cloudConvertCalled, true);
+    console.log('PASS Cloud Media mode bypasses WhatsApp bot onboarding and converts via server FFmpeg');
+  } finally {
+    cloudWeb.closeAllConnections?.();
+    await new Promise(resolve => cloudWeb.close(resolve));
+    await cloudGw.stop();
+    await rm(cloudDir, { recursive: true, force: true }).catch(() => undefined);
+  }
 
   assert.deepEqual(pageErrors, []);
 } finally {

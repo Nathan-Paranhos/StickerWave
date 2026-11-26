@@ -31,8 +31,14 @@ export function buildOpenApiDocument(config: GatewayConfig) {
       },
       '/api/v1/capabilities': {
         get: {
-          summary: 'Declared gateway media limits, encoders, and protocol compatibility mode',
+          summary: 'Declared Cloud Media & Gateway capabilities, encoders, and limits',
           responses: { '200': { description: 'Capabilities snapshot' } },
+        },
+      },
+      '/api/v1/media/convert': {
+        post: {
+          summary: 'Cloud FFmpeg processing (WebP 512x512, Ogg/Opus, MP4 Sticker Card with sound, or .wastickers pack)',
+          responses: { '200': { description: 'Rendered media binary' } },
         },
       },
       '/api/v1/admin/whatsapp/status': {

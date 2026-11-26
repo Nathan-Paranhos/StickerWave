@@ -79,6 +79,10 @@ export function applySecurityAndCorsHeaders(
       'Access-Control-Allow-Headers',
       'Content-Type, Authorization, X-Admin-Secret, X-Gateway-Token, Idempotency-Key',
     );
+    res.setHeader(
+      'Access-Control-Expose-Headers',
+      'X-Sticker-Animated, X-Sticker-Duration-Ms, X-Sticker-Bytes, X-Sticker-Cloud-Engine',
+    );
     res.setHeader('Access-Control-Max-Age', '600');
   }
   return { originAllowed: allowed, origin: originHeader };

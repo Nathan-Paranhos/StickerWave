@@ -16,6 +16,7 @@ test('Gateway security controls enforce admin auth, strict CORS, rate limiting, 
       dataDir: workDir,
       sessionDir: path.join(workDir, 'session'),
       dbPath: path.join(workDir, 'sec.db'),
+      enableWaBot: true,
       allowedOrigins: ['https://stickerwave.netlify.app'],
       rateLimitWindowMs: 60_000,
       rateLimitMaxRequests: 8,
@@ -65,6 +66,13 @@ test('Gateway security controls enforce admin auth, strict CORS, rate limiting, 
   });
   assert.equal(ssrfRes.status, 400);
 
+  const cloudSsrfRes = await fetch(`${baseUrl}/api/v1/media/convert`, {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+    body,
+  });
+  assert.equal(cloudSsrfRes.status, 400);
+
   // 4) Path traversal filenames are stripped & payload limits enforced cleanly with 413
   const oversizedConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-gw-cap-'));
   const capRuntime = createGatewayRuntime(
@@ -76,6 +84,7 @@ test('Gateway security controls enforce admin auth, strict CORS, rate limiting, 
       dataDir: oversizedConfigDir,
       sessionDir: path.join(oversizedConfigDir, 'session'),
       dbPath: path.join(oversizedConfigDir, 'cap.db'),
+      enableWaBot: true,
       maxVisualUploadBytes: 512,
       maxAudioUploadBytes: 512,
       allowedOrigins: ['*'],

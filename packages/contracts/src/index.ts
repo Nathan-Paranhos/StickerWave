@@ -217,12 +217,19 @@ export interface GatewayMetricsSnapshot {
   averageProcessingMs: number | null;
 }
 
+export const CLOUD_MEDIA_FORMATS = ['webp', 'opus', 'mp4', 'wastickers'] as const;
+export type CloudMediaFormat = (typeof CLOUD_MEDIA_FORMATS)[number];
+
 export interface GatewayCapabilitiesResponse {
+  cloudMediaEnabled?: boolean;
+  cloudFormats?: CloudMediaFormat[];
+  whatsappBotEnabled?: boolean;
   soundStickersEnabled: boolean;
   ffmpegVersion: string | null;
   encoders: {
     libwebp: boolean;
     libopus: boolean;
+    libx264?: boolean;
   };
   baileysVersion: string;
   protocolField26Supported: boolean;
@@ -244,6 +251,7 @@ export interface GatewayReadyResponse {
   ffmpegReady: boolean;
   sqliteReady: boolean;
   protocolReady: boolean;
+  whatsappBotEnabled?: boolean;
   whatsappConnected: boolean;
   whatsappStatus: WhatsAppConnectionStatus;
   soundStickersEnabled: boolean;

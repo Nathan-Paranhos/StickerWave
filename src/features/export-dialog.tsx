@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Archive, AudioLines, Check, Copy, Download, ExternalLink, Film, Image, MessageCircle, Package, Share2 } from 'lucide-react';
+import { Archive, AudioLines, Check, Cloud, Copy, Download, ExternalLink, Film, Image, MessageCircle, Package, Share2 } from 'lucide-react';
+import type { CloudMediaFormat, GatewayCapabilitiesResponse } from '@stickerwave/contracts';
 import { useApp } from '../app/context';
 import { Modal, Notice } from '../app/shared';
 import { imagePngExport, mp4Supported, renderExport, type ExportFormat, type ExportResult } from '../infrastructure/export';
+import { convertMediaViaCloudGateway, probeCloudGateway, renderProjectMediaForGateway } from '../infrastructure/gateway';
 import { videoFormats } from '../infrastructure/media';
 import { audioTracks, motion, projectDuration, visualLayers, type Project, type StoredAsset } from '../core/project';
 import { errorCode, type ErrorCode } from '../locales';
@@ -40,6 +42,8 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
   const [result, setResult] = useState<(ExportResult & { url: string; file: File; exportedFormat: ExportFormat })>();
   const [kit, setKit] = useState<KitResult>();
   const [container, setContainer] = useState(mp4Preferred);
+  const [cloudCaps, setCloudCaps] = useState<GatewayCapabilitiesResponse | null>(null);
+  const [useCloud, setUseCloud] = useState(true);
   const operation = useRef<AbortController | null>(null);
   const objectUrls = useRef<string[]>([]);
   const mounted = useRef(true);
@@ -51,6 +55,11 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
 
   useEffect(() => {
     mounted.current = true;
+    void probeCloudGateway().then((probe) => {
+      if (mounted.current && probe?.capabilities.cloudMediaEnabled) {
+        setCloudCaps(probe.capabilities);
+      }
+    });
     return () => {
       mounted.current = false;
       operation.current?.abort(new Error('3002'));
@@ -69,6 +78,14 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
     { id: 'backup', Icon: Archive, title: copy.backup, info: copy.backupAbout, disabled: false },
   ] as const;
 
+  function mapToCloudFormat(chosenFormat: ExportFormat, chosenContainer: string): CloudMediaFormat | null {
+    if (chosenFormat === 'webp' || chosenFormat === 'animated-webp') return 'webp';
+    if (chosenFormat === 'opus') return 'opus';
+    if (chosenFormat === 'wastickers') return 'wastickers';
+    if (chosenFormat === 'video' && (!chosenContainer || chosenContainer.startsWith('video/mp4'))) return 'mp4';
+    return null;
+  }
+
   async function start(overrideFormat?: ExportFormat, overrideContainer?: string) {
     if (operation.current) return;
     const chosenFormat = overrideFormat ?? format;
@@ -84,7 +101,41 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
     setFailure(undefined);
     setProgress(0);
     try {
-      const rendered = await renderExport(chosenFormat, project, assets, task.signal, value => { if (mounted.current) setProgress(value); }, frame, chosenContainer);
+      const cloudFormat = useCloud && cloudCaps?.cloudMediaEnabled ? mapToCloudFormat(chosenFormat, chosenContainer) : null;
+      let rendered: ExportResult | null = null;
+
+      if (cloudFormat && cloudCaps?.cloudFormats?.includes(cloudFormat)) {
+        try {
+          const media = await renderProjectMediaForGateway(project, assets, task.signal, {
+            frameMs: frame,
+            skipVisual: cloudFormat === 'opus',
+          });
+          if (mounted.current) setProgress(0.5);
+          task.signal.throwIfAborted();
+          const cloudRes = await convertMediaViaCloudGateway({
+            format: cloudFormat,
+            visualBlob: cloudFormat === 'opus' ? null : media.visualBlob,
+            visualName: cloudFormat === 'opus' ? null : media.visualName,
+            audioBlob: media.audioBlob,
+            audioName: media.audioName,
+            title: project.name,
+            shapeOptions: {
+              shape: project.stickerShape ?? 'square',
+              borderWhite: Boolean(project.stickerBorder),
+              background: project.background ?? null,
+            },
+            signal: task.signal,
+          });
+          rendered = { blob: cloudRes.blob, extension: cloudRes.extension };
+        } catch (cloudErr) {
+          if (task.signal.aborted) throw cloudErr;
+          rendered = null;
+        }
+      }
+
+      if (!rendered) {
+        rendered = await renderExport(chosenFormat, project, assets, task.signal, value => { if (mounted.current) setProgress(value); }, frame, chosenContainer);
+      }
       task.signal.throwIfAborted();
       const basename = safeBasename(project.name);
       const url = URL.createObjectURL(rendered.blob);
@@ -177,6 +228,17 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
           onClick={() => void start('wastickers', '')}>
           <Package size={16} />{copy.whatsappWastickersAction}
         </button>
+      </div>
+    </div>}
+
+    {!hasOutput && cloudCaps?.cloudMediaEnabled && <div className="whatsapp-direct-box">
+      <div className="whatsapp-direct-copy">
+        <strong><Cloud size={17} />{copy.waCloudBadge}</strong>
+        <p>{copy.waCloudExportHint}</p>
+        <label className="checkbox-row" style={{ marginTop: 8 }}>
+          <input type="checkbox" checked={useCloud} disabled={progress !== undefined} onChange={e => setUseCloud(e.target.checked)} />
+          <span>{copy.waCloudToggle}</span>
+        </label>
       </div>
     </div>}
 

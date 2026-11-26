@@ -311,8 +311,10 @@ export function SendToWhatsAppModal({
 
   const audioTrackCount = audioTracks(project).filter((t) => !t.style.muted).length;
   const gatewayMissing = gatewayState === 'unconfigured' || gatewayState === 'offline';
-  const botOffline = Boolean(gatewayState === 'online' && ready && (!ready.ready || !ready.whatsappConnected));
-  const featureDisabled = capabilities !== null && !capabilities.soundStickersEnabled;
+  const botDisabled = Boolean(capabilities && capabilities.whatsappBotEnabled === false);
+  const botOffline = Boolean(!botDisabled && gatewayState === 'online' && ready && (!ready.ready || !ready.whatsappConnected));
+  const featureDisabled = Boolean(capabilities && (!capabilities.soundStickersEnabled || capabilities.whatsappBotEnabled === false));
+  const inputsDisabled = gatewayMissing || botDisabled;
   const canCancel = Boolean(
     job && !TERMINAL_JOB_STATUSES.has(job.status) && job.status !== 'UPLOADING' && job.status !== 'SENDING',
   );
@@ -369,25 +371,29 @@ export function SendToWhatsAppModal({
       <p className="inspector-note">{copy.waSendPrivacyNote}</p>
 
       {(gatewayMissing || botOffline || featureDisabled) && (
-        <Notice error>
+        <Notice error={!botDisabled}>
           <div>
-            {featureDisabled
-              ? copy.waSendFeatureDisabled
-              : gatewayState === 'unconfigured'
-                ? copy.waSendGatewayNotConfigured
-                : gatewayState === 'offline'
-                  ? copy.waGatewayOffline
-                  : copy.waSendBotNotReady}
+            {botDisabled
+              ? copy.waSendBotDisabled
+              : featureDisabled
+                ? copy.waSendFeatureDisabled
+                : gatewayState === 'unconfigured'
+                  ? copy.waSendGatewayNotConfigured
+                  : gatewayState === 'offline'
+                    ? copy.waGatewayOffline
+                    : copy.waSendBotNotReady}
           </div>
           <div className="button-row" style={{ marginTop: 8 }}>
             <button type="button" className="button button-small button-outline" onClick={() => void checkGatewayConnection()}>
               <RefreshCw size={14} />
               {copy.retry}
             </button>
-            <Link className="button button-small button-outline" href="/whatsapp" onClick={close}>
-              {copy.waSendOpenAdminSetup}
-            </Link>
-            <button type="button" className="button button-small button-outline" onClick={onFallbackLocalExport}>
+            {!botDisabled && (
+              <Link className="button button-small button-outline" href="/whatsapp" onClick={close}>
+                {copy.waSendOpenAdminSetup}
+              </Link>
+            )}
+            <button type="button" className="button button-small button-green" onClick={onFallbackLocalExport}>
               {copy.waSendUseLocalExport}
             </button>
           </div>
@@ -400,7 +406,7 @@ export function SendToWhatsAppModal({
         <label className="auth-field">
           <span>{copy.waSendCountryLabel}</span>
           <select
-            disabled={gatewayMissing}
+            disabled={inputsDisabled}
             value={dialPrefix}
             onChange={(e) => {
               const dial = e.target.value;
@@ -425,7 +431,7 @@ export function SendToWhatsAppModal({
             <input
               type="tel"
               inputMode="tel"
-              disabled={gatewayMissing}
+              disabled={inputsDisabled}
               placeholder="11 99999-8888"
               value={rawPhone}
               onChange={(e) => {
@@ -439,7 +445,7 @@ export function SendToWhatsAppModal({
             <button
               type="button"
               className="button button-outline"
-              disabled={gatewayMissing || gatewayState === 'checking' || checkingPhone || !rawPhone.trim()}
+              disabled={inputsDisabled || gatewayState === 'checking' || checkingPhone || !rawPhone.trim()}
               onClick={() => void handleValidateAndCheckAuth()}
             >
               {checkingPhone ? <Loader2 size={15} className="spin" /> : <ShieldCheck size={15} />}

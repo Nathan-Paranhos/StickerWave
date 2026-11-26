@@ -15,6 +15,8 @@ export interface FFmpegCapabilities {
     libwebp: boolean;
     libopus: boolean;
     opusExperimental: boolean;
+    libx264: boolean;
+    aac: boolean;
   };
   error?: string;
 }
@@ -243,6 +245,8 @@ export class FFmpegAdapter {
         const libwebp = /\slibwebp\s/.test(encText);
         const libopus = /\slibopus\s/.test(encText);
         const opusExperimental = /\sopus\s/.test(encText);
+        const libx264 = /\slibx264\s/.test(encText);
+        const aac = /\saac\s/.test(encText);
         const ready = Boolean(versionLine && libwebp && (libopus || opusExperimental));
 
         const result: FFmpegCapabilities = {
@@ -250,7 +254,7 @@ export class FFmpegAdapter {
           ffmpegPath: this.ffmpegPath,
           ffprobePath: this.ffprobePath,
           versionLine,
-          encoders: { libwebp, libopus, opusExperimental },
+          encoders: { libwebp, libopus, opusExperimental, libx264, aac },
           ...(ready ? {} : { error: 'Missing required libwebp or libopus encoder in FFmpeg build.' }),
         };
         if (ready) this.cachedCapabilities = result;
@@ -262,7 +266,7 @@ export class FFmpegAdapter {
           ffmpegPath: this.ffmpegPath,
           ffprobePath: this.ffprobePath,
           versionLine: null,
-          encoders: { libwebp: false, libopus: false, opusExperimental: false },
+          encoders: { libwebp: false, libopus: false, opusExperimental: false, libx264: false, aac: false },
           error: msg,
         };
       } finally {

@@ -169,6 +169,12 @@ export async function handleApiCore({ method = 'GET', pathname, headers, bodyTex
     }
 
     if (normalizedPath === '/api/gateway/config' && method === 'PUT') {
+      if ((process.env.WHATSAPP_GATEWAY_URL || '').trim()) {
+        return jsonResponse(403, {
+          code: '7001',
+          error: 'Gateway URL is managed by server environment configuration.',
+        });
+      }
       const parsed = gatewayConfigSchema.safeParse(parseJsonText(bodyText));
       if (!parsed.success) {
         return jsonResponse(400, { code: '4002', error: 'Invalid gateway configuration payload.' });

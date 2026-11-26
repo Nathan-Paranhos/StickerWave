@@ -12,6 +12,8 @@ import { ExportDialog } from './export-dialog';
 import { SendToWhatsAppModal } from './whatsapp-send-modal';
 import { Inspector, type Tab } from './inspector';
 import { capabilities } from './pages';
+import { probeCloudGateway } from '../infrastructure/gateway';
+import type { GatewayCapabilitiesResponse } from '@stickerwave/contracts';
 import { Wavi } from './wavi';
 import { ThemeControl } from './preferences';
 import { usePreview } from './preview';
@@ -55,6 +57,7 @@ function Editor({ session, query }: { session: Session; query: string }) {
   const [activeTrack, setActiveTrack] = useState('primary-audio');
   const [exporting, setExporting] = useState(false);
   const [sendingWa, setSendingWa] = useState(false);
+  const [gwCaps, setGwCaps] = useState<GatewayCapabilitiesResponse | null>(null);
   const [diagnostics, setDiagnostics] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
   const [notice, setNotice] = useState<ErrorCode>();
@@ -90,6 +93,14 @@ function Editor({ session, query }: { session: Session; query: string }) {
     historyRef.current = [...historyRef.current.slice(-19), code];
   }
   const preview = usePreview(project, assets, report);
+
+  useEffect(() => {
+    let active = true;
+    void probeCloudGateway().then((probe) => {
+      if (active && probe) setGwCaps(probe.capabilities);
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     const network = () => setOffline(!navigator.onLine);
@@ -384,7 +395,7 @@ function Editor({ session, query }: { session: Session; query: string }) {
         <button className="icon-button studio-diagnostic" title={copy.diagnostic} aria-label={copy.diagnostic} onClick={() => setDiagnostics(true)}><Wrench size={17} /></button>
         <button className="language studio-lang" aria-label={`${locale.toUpperCase()} · ${copy.language}`} onClick={toggleLanguage}><Globe2 size={16} />{locale === 'pt' ? 'PT' : 'EN'}</button>
         <button className="icon-button studio-logout" title={copy.signOut} aria-label={copy.signOut} onClick={() => void draft.drain().then(() => logout())}><LogOut size={17} /></button>
-        <button className="button button-outline wa-send-header-btn" aria-label={copy.waSendButton} title={copy.waSendButton} onClick={() => { preview.halt(); setSendingWa(true); }} disabled={!haveComposition || Boolean(job)}><Send size={17} /><span>{copy.waSendButton}</span></button>
+        <button className="button button-outline wa-send-header-btn" aria-label={gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled ? copy.waCloudWhatsAppAction : copy.waSendButton} title={gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled ? copy.waCloudWhatsAppAction : copy.waSendButton} onClick={() => { preview.halt(); if (gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled) setExporting(true); else setSendingWa(true); }} disabled={!haveComposition || Boolean(job)}><Send size={17} /><span>{gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled ? copy.waCloudWhatsAppAction : copy.waSendButton}</span></button>
         <button className="button button-green export-button" onClick={() => { preview.halt(); setExporting(true); }} disabled={!haveComposition || Boolean(job)}><Download size={18} />{copy.export}</button>
       </div>
     </header>
@@ -470,8 +481,8 @@ function Editor({ session, query }: { session: Session; query: string }) {
             </div>
             {previewMode === 'whatsapp' && haveComposition && <div className="whatsapp-bubble-meta">
               <span>{copy.tapToPlaySticker}</span>
-              <button type="button" className="button button-green button-small" onClick={() => { preview.halt(); setSendingWa(true); }}>
-                <Send size={15} />{copy.waSendButton}
+              <button type="button" className="button button-green button-small" onClick={() => { preview.halt(); if (gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled) setExporting(true); else setSendingWa(true); }}>
+                <Send size={15} />{gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled ? copy.waCloudWhatsAppAction : copy.waSendButton}
               </button>
               <button type="button" className="button button-outline button-small" onClick={() => { preview.halt(); setExporting(true); }}>
                 <Download size={15} />{copy.whatsappDirectAction}

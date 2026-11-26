@@ -1,4 +1,5 @@
 import type {
+  CloudMediaFormat,
   GatewayCapabilitiesResponse,
   GatewayHealthResponse,
   GatewayMetricsSnapshot,
@@ -231,6 +232,83 @@ export async function fetchGatewayReady(): Promise<GatewayReadyResponse> {
 
 export function fetchGatewayCapabilities(): Promise<GatewayCapabilitiesResponse> {
   return gwFetch<GatewayCapabilitiesResponse>('/api/v1/capabilities');
+}
+
+export async function probeCloudGateway(): Promise<{
+  capabilities: GatewayCapabilitiesResponse;
+  ready: GatewayReadyResponse | null;
+} | null> {
+  try {
+    const capabilities = await fetchGatewayCapabilities();
+    const ready = await fetchGatewayReady().catch(() => null);
+    return { capabilities, ready };
+  } catch {
+    return null;
+  }
+}
+
+export async function convertMediaViaCloudGateway(params: {
+  format: CloudMediaFormat;
+  visualBlob?: Blob | null;
+  visualName?: string | null;
+  audioBlob?: Blob | null;
+  audioName?: string | null;
+  title?: string;
+  shapeOptions?: Partial<StickerShapeOptions>;
+  audioOptions?: StickerAudioOptions;
+  signal?: AbortSignal;
+}): Promise<{ blob: Blob; extension: string }> {
+  const baseUrl = await resolveGatewayBaseUrl();
+  const form = new FormData();
+  form.append('format', params.format);
+  if (params.visualBlob && params.visualName) {
+    form.append('visual', params.visualBlob, params.visualName);
+  }
+  if (params.audioBlob && params.audioName) {
+    form.append('audio', params.audioBlob, params.audioName);
+  }
+  if (params.title) {
+    form.append('title', params.title);
+  }
+  if (params.shapeOptions) {
+    form.append('shapeOptions', JSON.stringify(params.shapeOptions));
+  }
+  if (params.audioOptions) {
+    form.append('audioOptions', JSON.stringify(params.audioOptions));
+  }
+
+  const headers = new Headers();
+  const publicToken = getOptionalPublicToken();
+  if (publicToken) headers.set('X-Gateway-Token', publicToken);
+
+  const response = await fetch(`${baseUrl}/api/v1/media/convert`, {
+    method: 'POST',
+    headers,
+    body: form,
+    signal: params.signal,
+  });
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!response.ok || contentType.toLowerCase().includes('text/html')) {
+    const errPayload = contentType.toLowerCase().includes('application/json')
+      ? ((await response.json().catch(() => null)) as { code?: string; message?: string } | null)
+      : null;
+    throw new GatewayClientError(
+      response.status,
+      errPayload?.code || `GW-${response.status}`,
+      errPayload?.message || 'Cloud media conversion failed.',
+      true,
+    );
+  }
+
+  const blob = await response.blob();
+  const extMap: Record<CloudMediaFormat, string> = {
+    webp: 'webp',
+    opus: 'ogg',
+    mp4: 'mp4',
+    wastickers: 'wastickers',
+  };
+  return { blob, extension: extMap[params.format] };
 }
 
 export function validatePhoneWithGateway(phone: string, defaultCountry: 'BR' | 'US' = 'BR'): Promise<PhoneValidationResult> {
@@ -469,84 +547,88 @@ export async function renderProjectMediaForGateway(
   project: Project,
   assets: ReadonlyMap<string, StoredAsset>,
   signal: AbortSignal,
+  options: { frameMs?: number; skipVisual?: boolean } = {},
 ): Promise<{
   visualBlob: Blob;
   visualName: string;
   audioBlob: Blob | null;
   audioName: string | null;
 }> {
-  const composition = new Composition(signal);
-  try {
-    await composition.open(project, assets);
-    const hasMotion = composition.hasMotion(project);
+  const frameMs = options.frameMs ?? 0;
+  let visualBlob: Blob = new Blob([], { type: 'image/png' });
+  let visualName = 'empty.png';
 
-    const canvas = document.createElement('canvas');
-    canvas.width = SIZE;
-    canvas.height = SIZE;
+  if (!options.skipVisual) {
+    const composition = new Composition(signal);
+    try {
+      await composition.open(project, assets);
+      const hasMotion = composition.hasMotion(project);
 
-    let visualBlob: Blob;
-    let visualName: string;
+      const canvas = document.createElement('canvas');
+      canvas.width = SIZE;
+      canvas.height = SIZE;
 
-    if (!hasMotion) {
-      await composition.prepare(project, 0, false);
-      composition.draw(canvas, project, 0, false);
-      visualBlob = await canvasToBlob(canvas, 'image/png');
-      visualName = 'composition-static.png';
-    } else {
-      const durationMs = Math.min(10_000, Math.max(400, projectDuration(project, assets)));
-      const fps = 12;
-      const frameStepMs = Math.round(1000 / fps);
-      const frames: { bytes: Uint8Array; duration: number }[] = [];
-      let webpSupportedByCanvas = true;
-
-      for (let t = 0; t < durationMs; t += frameStepMs) {
-        signal.throwIfAborted();
-        await composition.prepare(project, t, false);
-        composition.draw(canvas, project, t, false);
-        const frameBlob = await canvasToBlob(canvas, 'image/webp', 0.85);
-        if (!frameBlob.type.includes('webp')) {
-          webpSupportedByCanvas = false;
-          break;
-        }
-        frames.push({
-          bytes: new Uint8Array(await frameBlob.arrayBuffer()),
-          duration: Math.min(frameStepMs, durationMs - t) || frameStepMs,
-        });
-      }
-
-      if (webpSupportedByCanvas && frames.length >= 2) {
-        visualBlob = webpAnimation(frames, SIZE, SIZE);
-        visualName = 'composition-animated.webp';
+      if (!hasMotion) {
+        await composition.prepare(project, frameMs, false);
+        composition.draw(canvas, project, frameMs, false);
+        visualBlob = await canvasToBlob(canvas, 'image/png');
+        visualName = 'composition-static.png';
       } else {
-        // Fallback when browser lacks canvas WebP frame encoding (e.g. legacy Safari): send original animated asset
-        const primaryAnimated = visualLayers(project).find(
-          (l) => l.kind === 'media' && !project.hidden.includes(l.id) && assets.get(l.asset)?.blob,
-        );
-        if (!primaryAnimated || primaryAnimated.kind !== 'media') {
-          await composition.prepare(project, 0, false);
-          composition.draw(canvas, project, 0, false);
-          visualBlob = await canvasToBlob(canvas, 'image/png');
-          visualName = 'composition-static.png';
+        const durationMs = Math.min(10_000, Math.max(400, projectDuration(project, assets)));
+        const fps = 12;
+        const frameStepMs = Math.round(1000 / fps);
+        const frames: { bytes: Uint8Array; duration: number }[] = [];
+        let webpSupportedByCanvas = true;
+
+        for (let t = 0; t < durationMs; t += frameStepMs) {
+          signal.throwIfAborted();
+          await composition.prepare(project, t, false);
+          composition.draw(canvas, project, t, false);
+          const frameBlob = await canvasToBlob(canvas, 'image/webp', 0.85);
+          if (!frameBlob.type.includes('webp')) {
+            webpSupportedByCanvas = false;
+            break;
+          }
+          frames.push({
+            bytes: new Uint8Array(await frameBlob.arrayBuffer()),
+            duration: Math.min(frameStepMs, durationMs - t) || frameStepMs,
+          });
+        }
+
+        if (webpSupportedByCanvas && frames.length >= 2) {
+          visualBlob = webpAnimation(frames, SIZE, SIZE);
+          visualName = 'composition-animated.webp';
         } else {
-          const asset = assets.get(primaryAnimated.asset)!;
-          visualBlob = asset.blob;
-          visualName = asset.name || 'animation.webm';
+          // Fallback when browser lacks canvas WebP frame encoding (e.g. legacy Safari): send original animated asset
+          const primaryAnimated = visualLayers(project).find(
+            (l) => l.kind === 'media' && !project.hidden.includes(l.id) && assets.get(l.asset)?.blob,
+          );
+          if (!primaryAnimated || primaryAnimated.kind !== 'media') {
+            await composition.prepare(project, frameMs, false);
+            composition.draw(canvas, project, frameMs, false);
+            visualBlob = await canvasToBlob(canvas, 'image/png');
+            visualName = 'composition-static.png';
+          } else {
+            const asset = assets.get(primaryAnimated.asset)!;
+            visualBlob = asset.blob;
+            visualName = asset.name || 'animation.webm';
+          }
         }
       }
+    } finally {
+      composition.close();
     }
-
-    const mixedAudio = await mixAudio(project, assets, signal);
-    let audioBlob: Blob | null = null;
-    let audioName: string | null = null;
-    if (mixedAudio) {
-      const channels = Array.from({ length: mixedAudio.numberOfChannels }, (_, i) => mixedAudio.getChannelData(i));
-      const wavBuf = pcmWav(channels, mixedAudio.sampleRate);
-      audioBlob = new Blob([wavBuf], { type: 'audio/wav' });
-      audioName = 'composition-mix.wav';
-    }
-
-    return { visualBlob, visualName, audioBlob, audioName };
-  } finally {
-    composition.close();
   }
+
+  const mixedAudio = await mixAudio(project, assets, signal);
+  let audioBlob: Blob | null = null;
+  let audioName: string | null = null;
+  if (mixedAudio) {
+    const channels = Array.from({ length: mixedAudio.numberOfChannels }, (_, i) => mixedAudio.getChannelData(i));
+    const wavBuf = pcmWav(channels, mixedAudio.sampleRate);
+    audioBlob = new Blob([wavBuf], { type: 'audio/wav' });
+    audioName = 'composition-mix.wav';
+  }
+
+  return { visualBlob, visualName, audioBlob, audioName };
 }
