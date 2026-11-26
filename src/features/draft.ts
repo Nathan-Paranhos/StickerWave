@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { type Project, type StoredAsset } from '../core/project';
+import { logError } from '../infrastructure/logger';
 import { save } from '../infrastructure/storage';
 import { errorCode, type ErrorCode } from '../locales';
 
@@ -37,8 +38,14 @@ export function useDraft(initial: Project, initialAssets: ReadonlyMap<string, St
             if (state.current.current === current) setStatus('saved');
           }
         } catch (error) {
+          const code = errorCode(error, '4001');
+          logError('studio.draft', 'autosave_failed', {
+            code,
+            detail: error,
+            meta: { id: project.id.slice(0, 8), baseline, assets: assets.size },
+          });
           if (mounted.current) {
-            setFailure(errorCode(error, '4001'));
+            setFailure(code);
             setStatus('saveError');
           }
           return;

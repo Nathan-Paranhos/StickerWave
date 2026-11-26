@@ -23,6 +23,7 @@ import { pcmWav } from '../core/wav';
 import { webpAnimation } from '../core/webp-animation';
 import { Composition } from './composition';
 import { mixAudio } from './mix';
+import { logError, logInfo, logWarn } from './logger';
 
 const DEFAULT_GATEWAY_BASE = '/gateway';
 const GW_URL_OVERRIDE_KEY = 'sw_gw_url';
@@ -100,11 +101,14 @@ export async function resolveGatewayBaseUrl(forceRefresh = false): Promise<strin
         const remote = sanitizeGatewayBaseUrl(data?.gatewayUrl);
         if (remote) {
           resolvedGatewayCache = remote;
+          logInfo('gateway', 'resolved_gateway_url', { url: remote });
           return remote;
         }
+      } else if (!res.ok) {
+        logWarn('gateway', 'site_gateway_config_http_error', { code: `GW-${res.status}`, meta: { status: res.status } });
       }
-    } catch {
-      // fallback to /gateway
+    } catch (err) {
+      logWarn('gateway', 'site_gateway_config_fetch_failed', { detail: err });
     }
     resolvedGatewayCache = DEFAULT_GATEWAY_BASE;
     return DEFAULT_GATEWAY_BASE;
@@ -122,8 +126,9 @@ export async function fetchSiteGatewayConfig(): Promise<{ gatewayUrl: string | n
     if (res.ok && ct.toLowerCase().includes('application/json')) {
       return (await res.json()) as { gatewayUrl: string | null; source: string };
     }
-  } catch {
-    // offline/unavailable
+    logWarn('gateway', 'site_gateway_config_non_json', { code: `GW-${res.status}`, meta: { status: res.status, ct } });
+  } catch (err) {
+    logWarn('gateway', 'site_gateway_config_unavailable', { detail: err });
   }
   return { gatewayUrl: null, source: 'none' };
 }
@@ -137,12 +142,12 @@ export async function publishPublicGatewayUrl(gatewayUrl: string | null, adminSe
   });
   const payload = (await res.json().catch(() => null)) as { ok?: boolean; gatewayUrl?: string | null; error?: string; code?: string } | null;
   if (!res.ok) {
-    throw new GatewayClientError(
-      res.status,
-      payload?.code || `GW-${res.status}`,
-      payload?.error || 'Não foi possível publicar a URL do Gateway no site.',
-    );
+    const code = payload?.code || `GW-${res.status}`;
+    const msg = payload?.error || 'Não foi possível publicar a URL do Gateway no site.';
+    logError('gateway', 'publish_gateway_url_failed', { code, detail: msg, meta: { status: res.status } });
+    throw new GatewayClientError(res.status, code, msg);
   }
+  logInfo('gateway', 'publish_gateway_url_succeeded', { configured: Boolean(payload?.gatewayUrl) });
   resolvedGatewayCache = sanitizeGatewayBaseUrl(payload?.gatewayUrl) || DEFAULT_GATEWAY_BASE;
   return payload?.gatewayUrl ?? null;
 }
@@ -166,6 +171,7 @@ export class GatewayClientError extends Error {
 async function gwFetch<T>(path: string, init: RequestInit = {}, adminSecret?: string): Promise<T> {
   const baseUrl = await resolveGatewayBaseUrl();
   const url = `${baseUrl}${path}`;
+  const safePath = path.split('?')[0];
   const headers = new Headers(init.headers ?? {});
   if (adminSecret) {
     headers.set('Authorization', `Bearer ${adminSecret}`);
@@ -177,7 +183,8 @@ async function gwFetch<T>(path: string, init: RequestInit = {}, adminSecret?: st
   let response: Response;
   try {
     response = await fetch(url, { ...init, headers });
-  } catch {
+  } catch (err) {
+    logWarn('gateway', 'fetch_network_error', { code: 'GW-0000', detail: err, meta: { path: safePath } });
     throw new GatewayClientError(0, 'GW-0000', 'Não foi possível conectar ao StickerWave WhatsApp Gateway.', true);
   }
 
@@ -186,6 +193,7 @@ async function gwFetch<T>(path: string, init: RequestInit = {}, adminSecret?: st
   const payload = isJson ? ((await response.json().catch(() => null)) as Record<string, unknown> | null) : null;
 
   if (!isJson && (response.status === 404 || response.status === 405 || response.status === 200)) {
+    logWarn('gateway', 'gateway_unconfigured_non_json', { code: 'GW-4044', meta: { path: safePath, status: response.status, contentType } });
     throw new GatewayClientError(
       404,
       'GW-4044',
@@ -198,10 +206,12 @@ async function gwFetch<T>(path: string, init: RequestInit = {}, adminSecret?: st
     const code = typeof payload?.code === 'string' ? payload.code : `GW-${response.status}`;
     const msg = typeof payload?.message === 'string' ? payload.message : `Erro no gateway (${response.status}).`;
     const retryable = Boolean(payload?.retryable);
+    logWarn('gateway', 'gateway_http_error', { code, detail: msg, meta: { path: safePath, status: response.status, retryable } });
     throw new GatewayClientError(response.status, code, msg, retryable);
   }
 
   if (!payload) {
+    logError('gateway', 'gateway_invalid_json_payload', { code: 'GW-5000', meta: { path: safePath, status: response.status } });
     throw new GatewayClientError(response.status, 'GW-5000', 'Resposta inválida do WhatsApp Gateway.', true);
   }
   return payload as unknown as T;
@@ -217,11 +227,13 @@ export async function fetchGatewayReady(): Promise<GatewayReadyResponse> {
   let res: Response;
   try {
     res = await fetch(url);
-  } catch {
+  } catch (err) {
+    logWarn('gateway', 'ready_network_error', { code: 'GW-0000', detail: err });
     throw new GatewayClientError(0, 'GW-0000', 'Não foi possível conectar ao StickerWave WhatsApp Gateway.', true);
   }
   const ct = res.headers.get('content-type') || '';
   if (!ct.toLowerCase().includes('application/json')) {
+    logWarn('gateway', 'ready_non_json', { code: 'GW-4044', meta: { status: res.status, ct } });
     throw new GatewayClientError(
       404,
       'GW-4044',
@@ -230,7 +242,10 @@ export async function fetchGatewayReady(): Promise<GatewayReadyResponse> {
     );
   }
   const body = (await res.json().catch(() => null)) as GatewayReadyResponse | null;
-  if (!body) throw new GatewayClientError(res.status, 'GW-5030', 'Gateway readiness check failed.', true);
+  if (!body) {
+    logWarn('gateway', 'ready_invalid_json', { code: 'GW-5030', meta: { status: res.status } });
+    throw new GatewayClientError(res.status, 'GW-5030', 'Gateway readiness check failed.', true);
+  }
   return body;
 }
 
@@ -246,7 +261,8 @@ export async function probeCloudGateway(): Promise<{
     const capabilities = await fetchGatewayCapabilities();
     const ready = await fetchGatewayReady().catch(() => null);
     return { capabilities, ready };
-  } catch {
+  } catch (err) {
+    logWarn('gateway', 'cloud_probe_unavailable', { detail: err });
     return null;
   }
 }
@@ -285,27 +301,36 @@ export async function convertMediaViaCloudGateway(params: {
   const publicToken = getOptionalPublicToken();
   if (publicToken) headers.set('X-Gateway-Token', publicToken);
 
-  const response = await fetch(`${baseUrl}/api/v1/media/convert`, {
-    method: 'POST',
-    headers,
-    body: form,
-    signal: params.signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/api/v1/media/convert`, {
+      method: 'POST',
+      headers,
+      body: form,
+      signal: params.signal,
+    });
+  } catch (err) {
+    logError('gateway', 'cloud_convert_network_error', { code: 'GW-0000', detail: err, meta: { format: params.format } });
+    throw err;
+  }
 
   const contentType = response.headers.get('content-type') || '';
   if (!response.ok || contentType.toLowerCase().includes('text/html')) {
     const errPayload = contentType.toLowerCase().includes('application/json')
       ? ((await response.json().catch(() => null)) as { code?: string; message?: string } | null)
       : null;
-    throw new GatewayClientError(
-      response.status,
-      errPayload?.code || `GW-${response.status}`,
-      errPayload?.message || 'Cloud media conversion failed.',
-      true,
-    );
+    const errCode = errPayload?.code || `GW-${response.status}`;
+    const errMsg = errPayload?.message || 'Cloud media conversion failed.';
+    logError('gateway', 'cloud_convert_failed', {
+      code: errCode,
+      detail: errMsg,
+      meta: { format: params.format, status: response.status, contentType },
+    });
+    throw new GatewayClientError(response.status, errCode, errMsg, true);
   }
 
   const blob = await response.blob();
+  logInfo('gateway', 'cloud_convert_succeeded', { format: params.format, bytes: blob.size });
   const extMap: Record<CloudMediaFormat, string> = {
     webp: 'webp',
     opus: 'ogg',
@@ -347,11 +372,19 @@ export async function processStickerViaGateway(params: {
   if (params.shapeOptions) form.append('shapeOptions', JSON.stringify(params.shapeOptions));
   if (params.audioOptions) form.append('audioOptions', JSON.stringify(params.audioOptions));
 
-  return gwFetch('/api/stickers/process', {
+  const result = await gwFetch<{ ok: true; sticker: EncodedSoundSticker }>('/api/stickers/process', {
     method: 'POST',
     body: form,
     signal: params.signal,
   });
+  logInfo('gateway', 'sticker_processed', {
+    webpBytes: result.sticker.webpBytes,
+    oggBytes: result.sticker.oggBytes,
+    strategy: result.sticker.protocolStrategy,
+    stickerType: result.sticker.stickerType,
+    durationMs: result.sticker.durationMs,
+  });
+  return result;
 }
 
 export async function addStickerToWhatsAppViaGateway(params: {
@@ -381,11 +414,18 @@ export async function addStickerToWhatsAppViaGateway(params: {
   if (params.shapeOptions) form.append('shapeOptions', JSON.stringify(params.shapeOptions));
   if (params.audioOptions) form.append('audioOptions', JSON.stringify(params.audioOptions));
 
-  return gwFetch<AddToWhatsAppResponse>('/api/stickers/add-to-whatsapp', {
+  const result = await gwFetch<AddToWhatsAppResponse>('/api/stickers/add-to-whatsapp', {
     method: 'POST',
     body: form,
     signal: params.signal,
   });
+  logInfo('gateway', 'add_to_whatsapp_completed', {
+    platform: result.platform,
+    strategy: result.strategy,
+    stickerType: result.stickerType,
+    supported: result.supported,
+  });
+  return result;
 }
 
 export function validatePhoneWithGateway(phone: string, defaultCountry: 'BR' | 'US' = 'BR'): Promise<PhoneValidationResult> {
@@ -535,8 +575,8 @@ async function consumeSseStream<T>(
       try {
         const parsed = JSON.parse(raw) as T;
         onEvent(eventName, parsed);
-      } catch {
-        // ignore keepalive / malformed chunk
+      } catch (parseErr) {
+        logWarn('gateway', 'sse_malformed_event', { detail: parseErr, meta: { eventName } });
       }
       eventName = 'message';
     };
@@ -561,7 +601,9 @@ async function consumeSseStream<T>(
     }
   } catch (err) {
     if (!signal.aborted) {
-      onError(err instanceof Error ? err : new Error(String(err)));
+      const errObj = err instanceof Error ? err : new Error(String(err));
+      logError('gateway', 'sse_stream_failed', { detail: errObj });
+      onError(errObj);
     }
   }
 }

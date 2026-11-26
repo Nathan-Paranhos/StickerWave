@@ -4,6 +4,7 @@ import { waveform } from '../core/wav';
 import { Composition } from '../infrastructure/composition';
 import { decodeAudio } from '../infrastructure/media';
 import { mixAudio } from '../infrastructure/mix';
+import { logError } from '../infrastructure/logger';
 import type { ErrorCode } from '../locales';
 
 export function usePreview(project: Project, assets: ReadonlyMap<string, StoredAsset>, report: (error: ErrorCode) => void) {
@@ -72,7 +73,14 @@ export function usePreview(project: Project, assets: ReadonlyMap<string, StoredA
       if (controller.signal.aborted) return;
       setVisualReady(true);
       return paint(token.position, false);
-    }).catch(() => { if (!controller.signal.aborted) current.current.report('1004'); });
+    }).catch((err) => {
+      logError('preview', 'compositor_open_or_paint_failed', {
+        code: '1004',
+        detail: err,
+        meta: { projectId: current.current.project.id, aborted: controller.signal.aborted },
+      });
+      if (!controller.signal.aborted) current.current.report('1004');
+    });
     return () => {
       stop.current();
       controller.abort();
@@ -103,7 +111,14 @@ export function usePreview(project: Project, assets: ReadonlyMap<string, StoredA
       const first = snapshot.audio ? buffers.get(snapshot.audio) : undefined;
       setBars(first ? waveform(first.getChannelData(0)) : []);
       setSoundReady(true);
-    })().catch(() => { if (!controller.signal.aborted) current.current.report('2002'); });
+    })().catch((err) => {
+      logError('preview', 'audio_mix_failed', {
+        code: '2002',
+        detail: err,
+        meta: { projectId: current.current.project.id, aborted: controller.signal.aborted },
+      });
+      if (!controller.signal.aborted) current.current.report('2002');
+    });
     return () => { controller.abort(); stop.current(); audio.current = null; };
   }, [audioEdit, assets]);
 
@@ -112,7 +127,16 @@ export function usePreview(project: Project, assets: ReadonlyMap<string, StoredA
     const next = Math.min(running.current.position, duration);
     running.current.position = next;
     setPosition(next);
-    if (visualReady) void paint(next, false).catch(() => current.current.report('1004'));
+    if (visualReady) {
+      void paint(next, false).catch((err) => {
+        logError('preview', 'scrub_paint_failed', {
+          code: '1004',
+          detail: err,
+          meta: { projectId: current.current.project.id, positionMs: Math.round(next) },
+        });
+        current.current.report('1004');
+      });
+    }
   }, [visualEdit, duration, visualReady]);
 
   useEffect(() => {

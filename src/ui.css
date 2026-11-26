@@ -690,3 +690,16 @@ progress { height: 13px; width: 100%; accent-color: #6a923b; }
   .studio-actions .studio-diagnostic, .studio-actions .studio-lang, .studio-actions .studio-wa-config { display: none; }
 }
 
+.diag-logs-details { margin: 10px 0; padding: 10px 12px; border-radius: 12px; border: 1px solid #d4dec9; background: #f6f8f3; text-align: left; }
+.diag-logs-summary { cursor: pointer; font-size: .86rem; font-weight: 800; color: #203815; }
+.diag-logs-details:not([open]) .diag-logs-body { display: none; }
+.diag-logs-body { display: grid; gap: 8px; margin-top: 8px; }
+.diag-logs-hint { margin: 0; font-size: .8rem; color: #36492e; }
+.diag-logs-pre { margin: 0; padding: 10px; max-height: 180px; overflow: auto; border-radius: 8px; background: #141913; color: #e6f2de; font-size: .74rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.diag-logs-empty { margin: 0; font-size: .82rem; color: #3d4d3a; }
+[data-theme="dark"] .diag-logs-details { background: #1c221b; border-color: #394837; }
+[data-theme="dark"] .diag-logs-summary { color: #dcf3b3; }
+[data-theme="dark"] .diag-logs-hint,
+[data-theme="dark"] .diag-logs-empty { color: #c7d8c1; }
+[data-theme="dark"] .diag-logs-pre { background: #0d110c; color: #e4f2db; border: 1px solid #2e3b2c; }
+

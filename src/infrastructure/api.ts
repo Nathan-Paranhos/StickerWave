@@ -1,4 +1,5 @@
 import type { Project } from '../core/project';
+import { logWarn } from './logger';
 import { clearVaultSession, readVaultSession, vaultLogin, vaultRegister } from './vault';
 
 export type AuthUser = {
@@ -157,31 +158,43 @@ export async function logoutAccount(): Promise<void> {
 }
 
 export async function apiListProjects(): Promise<Project[]> {
-  const res = await apiJson<{ projects?: Project[] }>('/api/projects', { method: 'GET' });
+  const res = await apiJson<{ projects?: Project[]; error?: string }>('/api/projects', { method: 'GET' });
   if (backendUnavailable(res)) { setAuthMode('local'); throw new Error('7004'); }
   if (res.status === 401) throw new Error('7001');
-  if (res.status !== 200 || !res.data?.projects) throw new Error('4002');
+  if (res.status !== 200 || !res.data?.projects) {
+    logWarn('api.projects', 'list_failed', { code: '4002', detail: res.data?.error, meta: { status: res.status } });
+    throw new Error('4002');
+  }
   return res.data.projects;
 }
 
 export async function apiLoadProject(id: string): Promise<Project | null> {
-  const res = await apiJson<{ project?: Project }>(`/api/projects/${id}`, { method: 'GET' });
+  const res = await apiJson<{ project?: Project; error?: string }>(`/api/projects/${id}`, { method: 'GET' });
   if (backendUnavailable(res)) { setAuthMode('local'); throw new Error('7004'); }
   if (res.status === 404) return null;
   if (res.status === 401) throw new Error('7001');
-  if (res.status !== 200 || !res.data?.project) throw new Error('4002');
+  if (res.status !== 200 || !res.data?.project) {
+    logWarn('api.projects', 'load_failed', { code: '4002', detail: res.data?.error, meta: { status: res.status, id: id.slice(0, 8) } });
+    throw new Error('4002');
+  }
   return res.data.project;
 }
 
 export async function apiSaveProject(project: Project, expectedRevision: number | null): Promise<Project> {
-  const res = await apiJson<{ project?: Project; code?: string }>(`/api/projects/${project.id}`, {
+  const res = await apiJson<{ project?: Project; code?: string; error?: string }>(`/api/projects/${project.id}`, {
     method: 'PUT',
     body: JSON.stringify({ project, expectedRevision }),
   });
   if (backendUnavailable(res)) { setAuthMode('local'); throw new Error('7004'); }
-  if (res.status === 409) throw new Error('4003');
+  if (res.status === 409) {
+    logWarn('api.projects', 'save_conflict', { code: '4003', meta: { id: project.id.slice(0, 8), expectedRevision } });
+    throw new Error('4003');
+  }
   if (res.status === 401) throw new Error('7001');
-  if (res.status !== 200 || !res.data?.project) throw new Error(res.data?.code ?? '4002');
+  if (res.status !== 200 || !res.data?.project) {
+    logWarn('api.projects', 'save_failed', { code: res.data?.code ?? '4002', detail: res.data?.error, meta: { status: res.status, id: project.id.slice(0, 8), expectedRevision } });
+    throw new Error(res.data?.code ?? '4002');
+  }
   return res.data.project;
 }
 

@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { Archive, AudioLines, Check, Cloud, Copy, Download, ExternalLink, Film, Image, MessageCircle, Package, Play, Share2, Square, Volume2 } from 'lucide-react';
 import type { AddToWhatsAppResponse, CloudMediaFormat, GatewayCapabilitiesResponse } from '@stickerwave/contracts';
 import { Link, useApp } from '../app/context';
-import { Modal, Notice } from '../app/shared';
+import { DiagnosticLogsBox, Modal, Notice } from '../app/shared';
 import { imagePngExport, mp4Supported, renderExport, type ExportFormat, type ExportResult } from '../infrastructure/export';
 import { addStickerToWhatsAppViaGateway, convertMediaViaCloudGateway, probeCloudGateway, renderProjectMediaForGateway } from '../infrastructure/gateway';
 import { videoFormats } from '../infrastructure/media';
 import { audioTracks, motion, projectDuration, visualLayers, type Project, type StoredAsset } from '../core/project';
+import { logError, logInfo, logWarn } from '../infrastructure/logger';
 import { errorCode, type ErrorCode } from '../locales';
 
 type Props = {
@@ -77,6 +78,7 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', onO
     const previewCtrl = new AbortController();
     void probeCloudGateway().then((probe) => {
       if (mounted.current && probe?.capabilities.cloudMediaEnabled) {
+        logInfo('export-dialog', 'cloud_gateway_ready', { formats: (probe.capabilities.cloudFormats || []).join(',') });
         setCloudCaps(probe.capabilities);
       }
     });
@@ -88,7 +90,9 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', onO
           previewUrlsRef.current.push(url);
           setThumbPreviewUrl(url);
         })
-        .catch(() => undefined);
+        .catch((err) => {
+          if (!previewCtrl.signal.aborted) logWarn('export-dialog', 'preview_thumb_failed', { detail: err });
+        });
       if (sound) {
         void renderProjectMediaForGateway(project, assets, previewCtrl.signal, { skipVisual: true })
           .then((m) => {
@@ -97,7 +101,9 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', onO
             previewUrlsRef.current.push(url);
             setPreviewAudioUrl(url);
           })
-          .catch(() => undefined);
+          .catch((err) => {
+            if (!previewCtrl.signal.aborted) logWarn('export-dialog', 'preview_audio_failed', { detail: err });
+          });
       }
     }
     return () => {
@@ -173,6 +179,11 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', onO
           rendered = { blob: cloudRes.blob, extension: cloudRes.extension };
         } catch (cloudErr) {
           if (task.signal.aborted) throw cloudErr;
+          logWarn('export-dialog', 'cloud_convert_fallback_local', {
+            code: errorCode(cloudErr, '3004'),
+            detail: cloudErr,
+            meta: { cloudFormat, chosenFormat },
+          });
           rendered = null;
         }
       }
@@ -185,7 +196,17 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', onO
       const url = URL.createObjectURL(rendered.blob);
       objectUrls.current.push(url);
       setResult({ ...rendered, url, exportedFormat: chosenFormat, file: new File([rendered.blob], `${basename}.${rendered.extension}`, { type: rendered.blob.type }) });
-    } catch (error) { if (mounted.current) setFailure(task.signal.aborted ? '3002' : errorCode(error, '3004')); }
+    } catch (error) {
+      const mapped = task.signal.aborted ? '3002' : errorCode(error, '3004');
+      if (!task.signal.aborted) {
+        logError('export-dialog', 'export_failed', {
+          code: mapped,
+          detail: error,
+          meta: { chosenFormat, chosenContainer },
+        });
+      }
+      if (mounted.current) setFailure(mapped);
+    }
     finally { operation.current = null; if (mounted.current) setProgress(undefined); }
   }
 
@@ -214,7 +235,13 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', onO
         audioUrl,
         audioFile: new File([mp3Res.blob], `${basename}.mp3`, { type: 'audio/mpeg' }),
       });
-    } catch (error) { if (mounted.current) setFailure(task.signal.aborted ? '3002' : errorCode(error, '3004')); }
+    } catch (error) {
+      const mapped = task.signal.aborted ? '3002' : errorCode(error, '3004');
+      if (!task.signal.aborted) {
+        logError('export-dialog', 'whatsapp_kit_failed', { code: mapped, detail: error });
+      }
+      if (mounted.current) setFailure(mapped);
+    }
     finally { operation.current = null; if (mounted.current) setProgress(undefined); }
   }
 
@@ -228,7 +255,8 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', onO
       const png = await imagePngExport(project, assets, ctrl.signal, frame);
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
       if (mounted.current) { setCopiedPng(true); setFailure(undefined); }
-    } catch {
+    } catch (err) {
+      logError('export-dialog', 'clipboard_copy_failed', { code: '3001', detail: err });
       if (mounted.current) setFailure('3001');
     }
   }
@@ -241,7 +269,14 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', onO
       try {
         await navigator.share({ files });
       } catch (fallbackError) {
-        if (!(fallbackError instanceof DOMException && fallbackError.name === 'AbortError')) setFailure('3004');
+        if (!(fallbackError instanceof DOMException && fallbackError.name === 'AbortError')) {
+          logWarn('export-dialog', 'web_share_failed', {
+            code: '3004',
+            detail: fallbackError,
+            meta: { fileCount: files.length },
+          });
+          setFailure('3004');
+        }
       }
     }
   }
@@ -299,7 +334,11 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', onO
         setBridgeResult({ response: res, webpUrl, webpFile, oggUrl, oggFile });
       }
     } catch (error) {
-      if (mounted.current) setFailure(task.signal.aborted ? '3002' : errorCode(error, '3004'));
+      const mapped = task.signal.aborted ? '3002' : errorCode(error, '3004');
+      if (!task.signal.aborted) {
+        logError('export-dialog', 'add_to_whatsapp_bridge_failed', { code: mapped, detail: error });
+      }
+      if (mounted.current) setFailure(mapped);
     } finally {
       operation.current = null;
       if (mounted.current) setProgress(undefined);
@@ -416,6 +455,7 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', onO
       {containers.map(item => <button key={item} disabled={progress !== undefined} aria-pressed={container === item} onClick={() => setContainer(item)}>{mimeVideo(item)}</button>)}
     </div><p className="inspector-note">{copy.native}</p></>}
     {failure && <Notice error={failure !== '3002'}>{copy.errors[failure]} [SW-{failure}]</Notice>}
+    {failure && failure !== '3002' && <DiagnosticLogsBox limit={15} />}
     {progress !== undefined && <div className="progress-area" role="status"><p>{copy.exporting}</p><progress value={progress || undefined} max={1} /></div>}
 
     {bridgeResult && <div className="export-result" role="status">

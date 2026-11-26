@@ -1,5 +1,6 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
+import { formatDiagnosticLogsText } from '../infrastructure/logger';
 import { Link, useApp } from './context';
 
 export function Brand() {
@@ -29,4 +30,19 @@ export function Modal({ title, children, close, className = '' }: { title: strin
 
 export function Notice({ children, error = false }: { children: ReactNode; error?: boolean }) {
   return <div className={`notice ${error ? 'notice-error' : ''}`} role={error ? 'alert' : 'status'}>{children}</div>;
+}
+
+/** Collapsible viewer showing sanitized session diagnostic logs without leaking secrets. */
+export function DiagnosticLogsBox({ limit = 25, showWhenEmpty = false }: { limit?: number; showWhenEmpty?: boolean }) {
+  const { copy } = useApp();
+  const [open, setOpen] = useState(false);
+  const text = formatDiagnosticLogsText(limit);
+  if (!text && !showWhenEmpty) return null;
+  return <details className="diag-logs-details" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary className="diag-logs-summary">{copy.diagnosticLogsTitle}</summary>
+    {open && <div className="diag-logs-body">
+      <p className="diag-logs-hint">{copy.diagnosticLogsHint}</p>
+      {text ? <pre className="diag-logs-pre">{text}</pre> : <p className="diag-logs-empty">{copy.diagnosticLogsEmpty}</p>}
+    </div>}
+  </details>;
 }

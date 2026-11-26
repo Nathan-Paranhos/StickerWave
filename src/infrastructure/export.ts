@@ -5,6 +5,7 @@ import { encodeWav } from './wav-job';
 import { Composition } from './composition';
 import { mixAudio } from './mix';
 import { closeVisual, identify, openVisual, videoFormats } from './media';
+import { logWarn } from './logger';
 
 export type ExportFormat = 'webp' | 'animated-webp' | 'whatsapp-image' | 'wastickers' | 'wav' | 'mp3' | 'opus' | 'video' | 'backup';
 export type ExportResult = { blob: Blob; extension: string };
@@ -132,11 +133,28 @@ async function soundExport(project: Project, assets: ReadonlyMap<string, StoredA
 
 async function validateMovieOutput(blob: Blob, mime: 'video/mp4' | 'video/webm', project: Project, duration: number, signal: AbortSignal, toleranceMs = 450) {
   const streams = movieStreams(new Uint8Array(await blob.arrayBuffer()), mime);
-  if (!streams.video || (audioTracks(project).length && !streams.audio)) throw new Error('3004');
+  const expectedAudio = audioTracks(project).length > 0;
+  if (!streams.video || (expectedAudio && !streams.audio)) {
+    logWarn('export', 'movie_stream_validation_failed', {
+      code: '3004',
+      meta: { mime, hasVideo: streams.video, hasAudio: streams.audio, expectedAudio, bytes: blob.size },
+    });
+    throw new Error('3004');
+  }
   const check = await openVisual(blob, mime, signal);
   try {
-    if (!(check instanceof HTMLVideoElement) || check.videoWidth !== SIZE || check.videoHeight !== SIZE ||
-      (Number.isFinite(check.duration) && Math.abs(check.duration * 1000 - duration) > toleranceMs)) throw new Error('3004');
+    const isVideo = check instanceof HTMLVideoElement;
+    const width = isVideo ? check.videoWidth : 0;
+    const height = isVideo ? check.videoHeight : 0;
+    const decodedMs = isVideo && Number.isFinite(check.duration) ? Math.round(check.duration * 1000) : null;
+    if (!isVideo || width !== SIZE || height !== SIZE ||
+      (decodedMs !== null && Math.abs(decodedMs - duration) > toleranceMs)) {
+      logWarn('export', 'movie_dimension_or_duration_mismatch', {
+        code: '3004',
+        meta: { mime, isVideo, width, height, decodedMs, expectedMs: duration, toleranceMs },
+      });
+      throw new Error('3004');
+    }
   } finally { closeVisual(check); }
 }
 

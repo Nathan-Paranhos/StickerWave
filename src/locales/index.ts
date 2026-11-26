@@ -294,6 +294,9 @@ export const pt = {
   waConfigCompatWebDesktop: 'WhatsApp Web & App Desktop (Windows/Mac): baixe o arquivo .webp 512×512 em Figurinhas → Criar (+) para salvar na bandeja sem app terceiro, ou envie o .mp4 com som direto no chat.',
   waConfigCompatMobile: 'Android & iOS: conecte um bot via QR Code abaixo para receber figurinhas sonoras direto no chat, ou exporte MP4 H.264/AAC / Kit PNG + MP3 / .wastickers.',
   waConfigBotDisabledHint: 'O pareamento por QR Code está desligado nesta instância (ENABLE_WA_BOT=false). Para parear uma conta WhatsApp aqui, defina ENABLE_WA_BOT=true no gateway (Render ou Docker/.env local) e recarregue esta página.',
+  diagnosticLogsTitle: 'Ver logs técnicos recentes',
+  diagnosticLogsEmpty: 'Nenhum evento ou erro registrado nesta sessão.',
+  diagnosticLogsHint: 'Registros locais sanitizados (sem tokens, telefones ou senhas) para diagnosticar erros de mídia, salvamento ou gateway:',
   errors: {
     '1001':'Formato incompatível. Escolha PNG, JPG, WebP, MP4/WebM ou um áudio compatível.',
     '1002':'A mídia ultrapassa o limite. Use até 4096 × 4096 px, 20 MB por imagem/áudio ou 50 MB por vídeo. Áudio e vídeo aceitam até 60 s.',
@@ -606,6 +609,9 @@ export const en: typeof pt = {
   waConfigCompatWebDesktop: 'WhatsApp Web & Desktop App (Windows/Mac): upload the 512×512 .webp file inside Stickers → Create (+) to save it straight to your tray, or send the MP4 card with sound in chat.',
   waConfigCompatMobile: 'Android & iOS: pair a bot account via QR Code below for direct sound sticker delivery, or use MP4 H.264/AAC / PNG + MP3 kit / .wastickers.',
   waConfigBotDisabledHint: 'QR pairing is currently disabled on this server (ENABLE_WA_BOT=false). Set ENABLE_WA_BOT=true in your gateway environment (Render or local Docker/.env) and reload to pair a WhatsApp session.',
+  diagnosticLogsTitle: 'View recent diagnostic logs',
+  diagnosticLogsEmpty: 'No events or errors recorded in this session.',
+  diagnosticLogsHint: 'Sanitized local logs (no tokens, phone numbers, or passwords) to diagnose media, storage, or gateway issues:',
   errors: {
     '1001':'Unsupported format. Choose PNG, JPG, WebP, MP4/WebM or a compatible audio file.',
     '1002':'Media exceeds the limit. Use up to 4096 × 4096 px, 20 MB per image/audio or 50 MB per video. Audio and video can be up to 60 s.',

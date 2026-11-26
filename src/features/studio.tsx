@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from 'react';
 import { AudioLines, CheckCircle2, CloudDownload, Download, FolderOpen, Globe2, ImagePlus, Layers, LoaderCircle, LogOut, MessageCircle, Play, Redo2, Send, Sparkles, Square, Undo2, Upload, Volume2, VolumeX, WifiOff, Wrench, Type } from 'lucide-react';
 import { Link, useApp } from '../app/context';
-import { Bars, Modal, Notice } from '../app/shared';
+import { Bars, DiagnosticLogsBox, Modal, Notice } from '../app/shared';
 import { audioTracks, clamp, createProject, initialSound, initialVisual, motion, newTrim, projectRefs, trackDuration, updateTrim, visualLayers, MAX_DURATION, MAX_LAYERS, MAX_TRACKS, type Project, type StoredAsset, type Trim } from '../core/project';
 import { catalog, catalogAsset, type Sound } from '../infrastructure/catalog';
 import { audioFormats, importMedia } from '../infrastructure/media';
 import { keepSound, load, personalSound } from '../infrastructure/storage';
 import { errorCode, type ErrorCode } from '../locales';
+import { getDiagnosticLogs, logError, logWarn } from '../infrastructure/logger';
 import { useDraft } from './draft';
 import { ExportDialog } from './export-dialog';
 import { SendToWhatsAppModal } from './whatsapp-send-modal';
@@ -39,8 +40,15 @@ export default function Studio({ id, query }: { id?: string; query: string }) {
     let active = true;
     load(id).then(data => {
       if (!active) return;
-      if (data) setSession({ ...data, existing: true }); else setMissing(true);
-    }).catch(() => { if (active) setMissing(true); });
+      if (data) setSession({ ...data, existing: true });
+      else {
+        logWarn('studio', 'project_not_found_on_load', { meta: { projectId: id } });
+        setMissing(true);
+      }
+    }).catch((err) => {
+      logError('studio', 'load_project_failed', { code: '4002', detail: err, meta: { projectId: id } });
+      if (active) setMissing(true);
+    });
     return () => { active = false; };
   }, [id]);
   if (!session) return missing ? <section className="wrap page"><div className="empty"><FolderOpen size={36} />
@@ -92,6 +100,7 @@ function Editor({ session, query }: { session: Session; query: string }) {
     setMessage('');
     setNotice(code);
     historyRef.current = [...historyRef.current.slice(-19), code];
+    logWarn('studio', 'ui_error_reported', { code, meta: { projectId: project.id } });
   }
   const preview = usePreview(project, assets, report);
 
@@ -184,7 +193,13 @@ function Editor({ session, query }: { session: Session; query: string }) {
     preview.halt();
     setJob('loading'); setNotice(undefined); setMessage('');
     try { await work(controller.signal); }
-    catch (error) { if (!controller.signal.aborted) report(errorCode(error, '1003')); }
+    catch (error) {
+      if (!controller.signal.aborted) {
+        const mapped = errorCode(error, '1003');
+        logError('studio', 'import_operation_failed', { code: mapped, detail: error, meta: { projectId: project.id } });
+        report(mapped);
+      }
+    }
     finally { if (operation.current === controller) { operation.current = null; setJob(null); } }
   }
   function importFiles(files: FileList | readonly File[], kind: 'visual' | 'audio') {
@@ -203,7 +218,16 @@ function Editor({ session, query }: { session: Session; query: string }) {
       let rejected: ErrorCode | undefined = selected.length > 8 ? '1002' : undefined;
       for (const file of selected.slice(0, 8)) {
         try { incoming.push(await importMedia(file, file.name, 'visual', signal)); }
-        catch (error) { if (signal.aborted) throw error; rejected = errorCode(error, '1003'); }
+        catch (error) {
+          if (signal.aborted) throw error;
+          const mapped = errorCode(error, '1003');
+          logWarn('studio', 'import_media_item_rejected', {
+            code: mapped,
+            detail: error,
+            meta: { mime: file.type || 'unknown', bytes: file.size },
+          });
+          rejected = mapped;
+        }
       }
       signal.throwIfAborted();
       if (incoming.length) acceptVisual(incoming);
@@ -587,6 +611,7 @@ function Editor({ session, query }: { session: Session; query: string }) {
     {diagnostics && <Modal title={copy.diagnostic} close={() => setDiagnostics(false)}>
       <p>{copy.noUpload}</p>
       <dl className="capabilities">{Object.entries(capabilities()).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ? copy.supported : copy.unavailable}</dd></div>)}</dl>
+      <DiagnosticLogsBox limit={30} showWhenEmpty />
       <p className="footer-credit">
         {copy.developedBy}{' '}
         <a className="credit-link" href="https://nathan-paranhos.com.br/" target="_blank" rel="noopener noreferrer">
@@ -594,7 +619,7 @@ function Editor({ session, query }: { session: Session; query: string }) {
         </a>
       </p>
       <button className="button button-outline" onClick={() => void navigator.clipboard.writeText(JSON.stringify({
-        version: '2.1.0-beta.1', capabilities: capabilities(), errors: historyRef.current.map(code => `SW-${code}`),
+        version: '2.1.0-beta.1', capabilities: capabilities(), errors: historyRef.current.map(code => `SW-${code}`), logs: getDiagnosticLogs().slice(-50),
       }, null, 2)).then(() => { setMessage(copy.copied); setDiagnostics(false); }).catch(() => { report('4002'); setDiagnostics(false); })}>{copy.copyDiagnostic}</button>
     </Modal>}
   </div>;

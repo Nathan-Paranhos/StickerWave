@@ -1,5 +1,6 @@
 import { normalizeProjectBounds, projectRefs, projectSchema, sanitizeProjectForAssets, validateAssets, type Project, type StoredAsset } from '../core/project';
 import { apiDeleteProject, apiListFavorites, apiListProjects, apiLoadProject, apiSaveProject, apiSetFavorite, isRemoteAccountMode } from './api';
+import { logError, logInfo, logWarn } from './logger';
 
 const databases = new Map<string, Promise<IDBDatabase>>();
 let activeUserId: string | null = null;
@@ -50,10 +51,14 @@ function result<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
-function completed(transaction: IDBTransaction) {
+function completed(transaction: IDBTransaction, operationName = 'idb.tx') {
   return new Promise<void>((resolve, reject) => {
     transaction.oncomplete = () => resolve();
-    transaction.onabort = () => reject(transaction.error ?? new Error('4002'));
+    transaction.onabort = () => {
+      const err = transaction.error ?? new Error('4002');
+      logError('storage.idb', 'transaction_aborted', { detail: err, meta: { op: operationName } });
+      reject(err);
+    };
   });
 }
 
@@ -67,15 +72,23 @@ export async function load(id: string): Promise<{ project: Project; assets: Read
       if (fetched) {
         const parsed = projectSchema.safeParse(fetched);
         if (parsed.success) remoteProject = parsed.data;
+        else logWarn('storage.load', 'remote_schema_invalid', { code: '4002', detail: parsed.error.issues.map(i => i.path.join('.')).join(','), meta: { id: id.slice(0, 8) } });
       }
     } catch (error) {
+      logWarn('storage.load', 'remote_fetch_failed', { detail: error, meta: { id: id.slice(0, 8) } });
       if (error instanceof Error && error.message === '7001') throw error;
     }
   }
   const candidate = remoteProject && (!localRaw || remoteProject.revision >= (localRaw.revision ?? 0)) ? remoteProject : localRaw;
-  if (!candidate) return null;
+  if (!candidate) {
+    logInfo('storage.load', 'project_not_found', { id: id.slice(0, 8), hasRemote: Boolean(remoteProject), hasLocal: Boolean(localRaw) });
+    return null;
+  }
   const parsedProject = projectSchema.safeParse(candidate);
-  if (!parsedProject.success) return null;
+  if (!parsedProject.success) {
+    logError('storage.load', 'project_schema_parse_failed', { code: '4002', detail: parsedProject.error.issues.map(i => `${i.path.join('.')}:${i.message}`).join('; '), meta: { id: id.slice(0, 8) } });
+    return null;
+  }
   const project = parsedProject.data;
 
   const assetsTx = (await open()).transaction('assets');
@@ -83,6 +96,7 @@ export async function load(id: string): Promise<{ project: Project; assets: Read
   const collection = new Map(assets.filter(Boolean).map(asset => [asset.id, asset]));
   const { project: healedProject, missingMediaCount } = sanitizeProjectForAssets(project, collection);
   if (missingMediaCount > 0) {
+    logWarn('storage.load', 'healed_missing_local_assets', { meta: { id: id.slice(0, 8), missingMediaCount, keptAssets: collection.size } });
     return { project: healedProject, assets: collection, missingLocalMedia: true };
   }
   validateAssets(healedProject, collection);
@@ -123,7 +137,12 @@ export async function save(project: Project, assets: ReadonlyMap<string, StoredA
     revision: (expectedRevision ?? 0) + 1,
     updatedAt: new Date().toISOString(),
   });
-  validateAssets(next, assets);
+  try {
+    validateAssets(next, assets);
+  } catch (error) {
+    logError('storage.save', 'validate_assets_failed', { code: '4002', detail: error, meta: { id: project.id.slice(0, 8), refs: projectRefs(next).length, mapSize: assets.size } });
+    throw error;
+  }
 
   if (remoteActive()) {
     try {
@@ -131,17 +150,19 @@ export async function save(project: Project, assets: ReadonlyMap<string, StoredA
       const parsed = projectSchema.safeParse(savedRemote);
       if (parsed.success) next = parsed.data;
     } catch (error) {
+      logWarn('storage.save', 'remote_save_failed', { detail: error, meta: { id: project.id.slice(0, 8), expectedRevision } });
       if (error instanceof Error && ['4003', '7001', '4002'].includes(error.message)) throw error;
     }
   }
 
   const tx = (await open()).transaction(['projects', 'assets'], 'readwrite');
-  const done = completed(tx);
+  const done = completed(tx, `save:${next.id.slice(0, 8)}`);
   // Attach a rejection handler before the revision read, including when a browser aborts the read.
   void done.catch(() => undefined);
   const projects = tx.objectStore('projects');
   const existing = await result<Project | undefined>(projects.get(next.id));
   if (!remoteActive() && (existing?.revision ?? null) !== expectedRevision) {
+    logWarn('storage.save', 'local_revision_conflict', { code: '4003', meta: { id: next.id.slice(0, 8), existingRev: existing?.revision ?? null, expectedRevision } });
     tx.abort();
     throw new Error('4003');
   }
@@ -150,7 +171,11 @@ export async function save(project: Project, assets: ReadonlyMap<string, StoredA
     const asset = assets.get(id)!;
     const current = await result<StoredAsset | undefined>(store.get(id));
     if (!current || current.sha256 === asset.sha256) store.put(asset);
-    else { tx.abort(); throw new Error('4002'); }
+    else {
+      logError('storage.save', 'asset_sha256_mismatch', { code: '4002', meta: { projectId: next.id.slice(0, 8), assetId: id.slice(0, 8) } });
+      tx.abort();
+      throw new Error('4002');
+    }
   }
   projects.put(next);
   const all = await result<Project[]>(projects.getAll());

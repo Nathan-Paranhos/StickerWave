@@ -1,8 +1,9 @@
 import { Unzip, UnzipInflate, strFromU8, strToU8, zipSync } from 'fflate';
 import { z } from 'zod';
 import { assetSchema, normalizeProjectBounds, projectRefs, projectSchema, validateAssets, type Project, type StoredAsset } from '../core/project';
-import { hash, importMedia } from './media';
 import { imageExport } from './export';
+import { logError, logWarn } from './logger';
+import { hash, importMedia } from './media';
 
 const maxBytes = 100 * 1024 ** 2;
 const files = ['manifest.json', 'project.json', 'licenses.json', 'preview.webp'];
@@ -105,23 +106,58 @@ async function unpack(blob: Blob, signal: AbortSignal) {
 }
 
 export async function readBackup(file: Blob, signal: AbortSignal) {
-  const staged = await unpack(file, signal);
+  let staged: Map<string, Uint8Array<ArrayBuffer>>;
+  try {
+    staged = await unpack(file, signal);
+  } catch (error) {
+    if (!signal.aborted) {
+      logError('backup.read', 'unpack_failed', { code: error instanceof Error ? error.message : '4002', detail: error, meta: { bytes: file.size } });
+    }
+    throw error;
+  }
   const json = (name: string): unknown => {
     try { return JSON.parse(strFromU8(staged.get(name)!)); }
-    catch { throw new Error('4002'); }
+    catch (error) {
+      logError('backup.read', 'json_parse_failed', { code: '4002', detail: error, meta: { entry: name } });
+      throw new Error('4002');
+    }
   };
   const project = projectSchema.parse(json('project.json'));
   const manifest = manifestSchema.parse(json('manifest.json'));
-  if (manifest.assets.length + files.length !== staged.size || manifest.assets.length !== projectRefs(project).length) throw new Error('4002');
+  if (manifest.assets.length + files.length !== staged.size || manifest.assets.length !== projectRefs(project).length) {
+    logError('backup.read', 'manifest_ref_count_mismatch', {
+      code: '4002',
+      meta: { manifestAssets: manifest.assets.length, staged: staged.size, refs: projectRefs(project).length },
+    });
+    throw new Error('4002');
+  }
   const assets = new Map<string, StoredAsset>();
   for (const asset of manifest.assets) {
     const content = staged.get(assetPath(asset));
-    if (!content || assets.has(asset.id) || content.length !== asset.size) throw new Error('4002');
+    if (!content || assets.has(asset.id) || content.length !== asset.size) {
+      logError('backup.read', 'asset_entry_mismatch', { code: '4002', meta: { assetId: asset.id.slice(0, 8), found: Boolean(content), actualSize: content?.length ?? 0, expectedSize: asset.size } });
+      throw new Error('4002');
+    }
     const blob = new Blob([content], { type: asset.mime });
-    if (await hash(blob) !== asset.sha256) throw new Error('4002');
+    if (await hash(blob) !== asset.sha256) {
+      logError('backup.read', 'asset_sha256_mismatch', { code: '4002', meta: { assetId: asset.id.slice(0, 8) } });
+      throw new Error('4002');
+    }
     const verified = await importMedia(blob, asset.name, asset.mime.startsWith('audio/') ? 'audio' : 'visual', signal);
     if (verified.mime !== asset.mime || verified.width !== asset.width || verified.height !== asset.height ||
-      Math.abs(verified.duration - asset.duration) > 500 || (asset.frames ?? 1) !== (verified.frames ?? 1)) throw new Error('4002');
+      Math.abs(verified.duration - asset.duration) > 500 || (asset.frames ?? 1) !== (verified.frames ?? 1)) {
+      logWarn('backup.read', 'decoded_metadata_mismatch', {
+        code: '4002',
+        meta: {
+          assetId: asset.id.slice(0, 8),
+          mime: `${verified.mime}/${asset.mime}`,
+          size: `${verified.width}x${verified.height}/${asset.width}x${asset.height}`,
+          durDeltaMs: Math.abs(verified.duration - asset.duration),
+          frames: `${verified.frames ?? 1}/${asset.frames ?? 1}`,
+        },
+      });
+      throw new Error('4002');
+    }
     assets.set(asset.id, { ...asset, ...verified, id: asset.id });
   }
   const normalized = normalizeProjectBounds(project, assets);

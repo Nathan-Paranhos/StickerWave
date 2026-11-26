@@ -22,7 +22,7 @@ import {
   WifiOff,
 } from 'lucide-react';
 import { useApp } from '../app/context';
-import { Notice } from '../app/shared';
+import { DiagnosticLogsBox, Notice } from '../app/shared';
 import {
   connectWhatsAppBot,
   disconnectWhatsAppBot,
@@ -40,6 +40,7 @@ import {
   subscribeWhatsAppAdminEvents,
   verifyGatewayAdminSecret,
 } from '../infrastructure/gateway';
+import { logError, logWarn } from '../infrastructure/logger';
 
 const ADMIN_SECRET_STORAGE_KEY = 'sw_gw_admin_secret';
 
@@ -108,6 +109,11 @@ export function WhatsAppAdminPage() {
       setJobs(jobList.jobs);
       setOpError(null);
     } catch (err) {
+      logWarn('wa-admin', 'dashboard_load_failed', {
+        code: err instanceof GatewayClientError ? err.code : undefined,
+        detail: err,
+        meta: { status: err instanceof GatewayClientError ? err.status : 0 },
+      });
       if (err instanceof GatewayClientError && err.status === 401) {
         saveStoredAdminSecret(null);
         setAdminSecret(null);
@@ -129,6 +135,10 @@ export function WhatsAppAdminPage() {
       setReadyState(readyInfo);
       if (capInfo) setCapabilities(capInfo);
     } catch (err) {
+      logWarn('wa-admin', 'public_probe_failed', {
+        code: err instanceof GatewayClientError ? err.code : 'GW-0000',
+        detail: err,
+      });
       setReadyState(null);
       setCapabilities(null);
       setPublicError(err instanceof Error ? err.message : copy.waGatewayOffline);
@@ -156,7 +166,8 @@ export function WhatsAppAdminPage() {
         setAdminSecret(initial);
         void loadDashboard(initial);
       })
-      .catch(() => {
+      .catch((err) => {
+        logWarn('wa-admin', 'stored_secret_invalid_cleared', { detail: err });
         if (!mounted) return;
         saveStoredAdminSecret(null);
         setAdminSecret(null);
@@ -234,6 +245,10 @@ export function WhatsAppAdminPage() {
       setAdminSecret(secret);
       await loadDashboard(secret);
     } catch (err) {
+      logError('wa-admin', 'admin_signin_failed', {
+        code: err instanceof GatewayClientError ? err.code : undefined,
+        detail: err,
+      });
       setAuthError(err instanceof Error ? err.message : copy.waAdminInvalidSecret);
     } finally {
       setAuthBusy(false);
@@ -258,6 +273,10 @@ export function WhatsAppAdminPage() {
       setSnapshot(next);
       await loadDashboard(adminSecret);
     } catch (err) {
+      logError('wa-admin', 'connection_action_failed', {
+        code: err instanceof GatewayClientError ? err.code : undefined,
+        detail: err,
+      });
       setOpError(err instanceof Error ? err.message : copy.waGatewayOffline);
     } finally {
       setActionBusy(false);
@@ -341,6 +360,7 @@ export function WhatsAppAdminPage() {
               <p>{copy.waConfigCompatWebDesktop}</p>
               <p>{copy.waConfigCompatMobile}</p>
             </div>
+            <DiagnosticLogsBox limit={25} showWhenEmpty />
           </article>
 
           <article className="wa-card">
@@ -636,6 +656,13 @@ export function WhatsAppAdminPage() {
             </table>
           </div>
         )}
+      </article>
+
+      <article className="wa-card wa-jobs-card">
+        <div className="wa-card-head">
+          <h2>{copy.diagnosticLogsTitle}</h2>
+        </div>
+        <DiagnosticLogsBox limit={40} showWhenEmpty />
       </article>
     </section>
   );

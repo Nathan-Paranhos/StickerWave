@@ -1,5 +1,6 @@
 import { motion, SIZE, visualLayers, type Project, type StoredAsset, type VisualStyle } from '../core/project';
 import { openDecoder, pagedMime } from './frames';
+import { logError } from './logger';
 import { closeVisual, drawMedia, drawText, openVisual, seek, type Drawable } from './media';
 
 type Slot = {
@@ -19,7 +20,10 @@ export class Composition {
         if (layer.kind === 'text') continue;
         this.signal.throwIfAborted();
         const asset = assets.get(layer.asset);
-        if (!asset) throw new Error('4002');
+        if (!asset) {
+          logError('composition', 'missing_visual_asset', { code: '4002', meta: { layerId: layer.id.slice(0, 8), assetId: layer.asset.slice(0, 8) } });
+          throw new Error('4002');
+        }
         const slot: Slot = { asset, drawable: null, index: -1 };
         this.slots.set(layer.id, slot);
         if (asset.animated) slot.image = await openDecoder(asset.blob, asset.mime, this.signal);

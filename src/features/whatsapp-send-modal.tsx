@@ -22,7 +22,8 @@ import {
 } from 'lucide-react';
 import { audioTracks, visualLayers, type Project, type StoredAsset } from '../core/project';
 import { Link, useApp } from '../app/context';
-import { Modal, Notice } from '../app/shared';
+import { DiagnosticLogsBox, Modal, Notice } from '../app/shared';
+import { logError, logWarn } from '../infrastructure/logger';
 import {
   cancelStickerJob,
   confirmRecipientAuthorizationCode,
@@ -94,6 +95,11 @@ export function SendToWhatsAppModal({
       setReady(null);
       setCapabilities(null);
       const isNotFound = err instanceof GatewayClientError && (err.code === 'GW-4044' || err.status === 404);
+      logWarn('wa-send', 'gateway_check_failed', {
+        code: err instanceof GatewayClientError ? err.code : 'GW-0000',
+        detail: err,
+        meta: { isNotFound },
+      });
       setGatewayState(isNotFound ? 'unconfigured' : 'offline');
     }
   }
@@ -121,6 +127,11 @@ export function SendToWhatsAppModal({
         setCapabilities(null);
         const e = readyResult.err;
         const isNotFound = e instanceof GatewayClientError && (e.code === 'GW-4044' || e.status === 404);
+        logWarn('wa-send', 'initial_gateway_probe_failed', {
+          code: e instanceof GatewayClientError ? e.code : 'GW-0000',
+          detail: e,
+          meta: { isNotFound },
+        });
         setGatewayState(isNotFound ? 'unconfigured' : 'offline');
       }
     });
@@ -133,7 +144,11 @@ export function SendToWhatsAppModal({
         audioUrl = rendered.audioBlob ? URL.createObjectURL(rendered.audioBlob) : null;
         setPreviewUrls({ visual: visualUrl, audio: audioUrl });
       })
-      .catch(() => undefined);
+      .catch((err) => {
+        if (!previewCtrl.signal.aborted) {
+          logWarn('wa-send', 'preview_media_render_failed', { detail: err, meta: { projectId: project.id } });
+        }
+      });
 
     return () => {
       active = false;
@@ -156,7 +171,9 @@ export function SendToWhatsAppModal({
       (evt) => {
         setJob(evt.job);
       },
-      () => undefined,
+      (err) => {
+        logWarn('wa-send', 'job_sse_error', { detail: err, meta: { jobId: job.id } });
+      },
       ctrl.signal,
     );
 
@@ -196,6 +213,10 @@ export function SendToWhatsAppModal({
         setAuthorized(issued.authorized);
       }
     } catch (err) {
+      logWarn('wa-send', 'phone_validation_or_auth_failed', {
+        code: err instanceof GatewayClientError ? err.code : undefined,
+        detail: err,
+      });
       setError(err instanceof Error ? err.message : copy.waGatewayOffline);
     } finally {
       setCheckingPhone(false);
@@ -214,6 +235,7 @@ export function SendToWhatsAppModal({
         setAuthorized(confirmed.authorized);
       }
     } catch (err) {
+      logWarn('wa-send', 'manual_code_confirm_failed', { detail: err });
       setError(err instanceof Error ? err.message : copy.waSendAuthNotConfirmed);
     } finally {
       setCheckingPhone(false);
@@ -230,6 +252,7 @@ export function SendToWhatsAppModal({
       setAuthorized(res.authorized);
       if (res.authorized) setChallenge(null);
     } catch (err) {
+      logWarn('wa-send', 'manual_code_confirm_failed', { detail: err });
       setError(err instanceof Error ? err.message : copy.waSendAuthNotConfirmed);
     } finally {
       setCheckingPhone(false);
@@ -285,6 +308,8 @@ export function SendToWhatsAppModal({
 
       setJob(enqueued.job);
     } catch (err) {
+      const code = err instanceof GatewayClientError ? err.code : undefined;
+      logError('wa-send', 'send_sticker_job_failed', { code, detail: err, meta: { projectId: project.id } });
       const msg =
         err instanceof GatewayClientError
           ? `[${err.code}] ${err.message}`
@@ -305,6 +330,7 @@ export function SendToWhatsAppModal({
       setJob(res.job);
       idempKeyRef.current = '';
     } catch (err) {
+      logWarn('wa-send', 'cancel_job_failed', { detail: err, meta: { jobId: job.id } });
       setError(err instanceof Error ? err.message : copy.waGatewayOffline);
     }
   }
@@ -536,7 +562,10 @@ export function SendToWhatsAppModal({
         </div>
       )}
 
-      {error && <Notice error>{error}</Notice>}
+      {error && <>
+        <Notice error>{error}</Notice>
+        <DiagnosticLogsBox limit={15} />
+      </>}
 
       <div className="dialog-actions">
         {canCancel && (

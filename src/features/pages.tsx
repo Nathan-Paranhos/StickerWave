@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AudioLines, BookOpen, CircleHelp, Code2, Download, FileArchive, Folder, FolderOpen, Globe2, ImagePlus,
   LogOut, Menu, MessageCircle, Mic, Plus, ScanLine, ShieldCheck, Sparkles, Trash2, Upload, User, X } from 'lucide-react';
-import { Brand, Modal, Notice } from '../app/shared';
+import { Brand, DiagnosticLogsBox, Modal, Notice } from '../app/shared';
 import { Link, useApp } from '../app/context';
 import { Wavi } from './wavi';
 import { ThemeControl } from './preferences';
@@ -10,6 +10,7 @@ import { errorCode, type ErrorCode } from '../locales';
 import { listProjects, removeProject, save } from '../infrastructure/storage';
 import type { Project } from '../core/project';
 import { videoFormats, audioFormats } from '../infrastructure/media';
+import { getDiagnosticLogs, logError } from '../infrastructure/logger';
 
 export function Header() {
   const { copy, locale, path, toggleLanguage, user, logout } = useApp();
@@ -115,7 +116,10 @@ export function ProjectsPage() {
   const controller = useRef<AbortController | null>(null);
   useEffect(() => {
     let active = true;
-    listProjects().then(data => { if (active) setProjects(data); }).catch(() => { if (active) setNotice('4001'); });
+    listProjects().then(data => { if (active) setProjects(data); }).catch((err) => {
+      logError('projects-page', 'list_projects_failed', { code: '4001', detail: err });
+      if (active) setNotice('4001');
+    });
     return () => { active = false; controller.current?.abort(); };
   }, []);
   async function restore(file?: File) {
@@ -130,7 +134,13 @@ export function ProjectsPage() {
       operation.signal.throwIfAborted();
       const result = await save({ ...project, id: crypto.randomUUID(), revision: 0 }, assets, null);
       if (!operation.signal.aborted) navigate(`/studio/${result.id}?restored=1`);
-    } catch (error) { if (!operation.signal.aborted) setNotice(errorCode(error, '4002')); }
+    } catch (error) {
+      if (!operation.signal.aborted) {
+        const mapped = errorCode(error, '4002');
+        logError('projects-page', 'restore_backup_failed', { code: mapped, detail: error });
+        setNotice(mapped);
+      }
+    }
     finally { controller.current = null; setRestoring(false); }
   }
   async function confirmDelete() {
@@ -138,7 +148,11 @@ export function ProjectsPage() {
       await removeProject(pending === 'all' ? undefined : pending ?? undefined);
       setProjects(await listProjects());
       setNotice(undefined);
-    } catch (error) { setNotice(errorCode(error, '4001')); }
+    } catch (error) {
+      const mapped = errorCode(error, '4001');
+      logError('projects-page', 'delete_project_failed', { code: mapped, detail: error });
+      setNotice(mapped);
+    }
     finally { setPending(null); }
   }
   return <section className="wrap page projects-page">
@@ -278,7 +292,8 @@ export function Editorial({ topic }: { topic: EditorialPage }) {
     </article>}
     {info && <article><h2>{copy.diagnosticsTitle}</h2>
       <dl className="capabilities">{Object.entries(info).map(([name, available]) => <div key={name}><dt>{name}</dt><dd>{available ? copy.supported : copy.unavailable}</dd></div>)}</dl>
-      <button className="button button-outline" onClick={() => void navigator.clipboard.writeText(JSON.stringify({ version: '2.1.0-beta.1', capabilities: info }, null, 2))
+      <DiagnosticLogsBox limit={30} showWhenEmpty />
+      <button className="button button-outline" onClick={() => void navigator.clipboard.writeText(JSON.stringify({ version: '2.1.0-beta.1', capabilities: info, logs: getDiagnosticLogs().slice(-50) }, null, 2))
         .then(() => { setCopied(true); setFailed(false); }).catch(() => setFailed(true))}>{copy.copyDiagnostic}</button>
       {copied && <p role="status">{copy.copied}</p>}{failed && <Notice error>{copy.errors['4002']}</Notice>}
     </article>}

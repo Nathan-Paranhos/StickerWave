@@ -1,4 +1,5 @@
 import { audioTracks, trackDuration, type Project, type SoundStyle, type StoredAsset } from '../core/project';
+import { logError } from './logger';
 import { decodeAudio } from './media';
 
 const sampleRate = 48_000;
@@ -46,7 +47,10 @@ export async function mixAudio(project: Project, assets: ReadonlyMap<string, Sto
   for (const track of tracks) {
     signal.throwIfAborted();
     const asset = assets.get(track.asset);
-    if (!asset) throw new Error('4002');
+    if (!asset) {
+      logError('mix.audio', 'missing_audio_asset', { code: '4002', meta: { trackId: track.id.slice(0, 8), assetId: track.asset.slice(0, 8) } });
+      throw new Error('4002');
+    }
     if (!sources.has(track.asset)) sources.set(track.asset, decoded?.get(track.asset) ?? await decodeAudio(asset.blob));
   }
   const channels = Math.max(1, ...[...sources.values()].map(buffer => buffer.numberOfChannels));

@@ -196,12 +196,16 @@ export async function handleApiCore({ method = 'GET', pathname, headers, bodyTex
             signal: AbortSignal.timeout(6000),
           });
           if (!verifyRes.ok) {
+            console.warn('[StickerWave:API] gateway_config_verify_rejected', { status: verifyRes.status });
             return jsonResponse(401, {
               code: '7001',
               error: 'Target WhatsApp Gateway rejected the provided GATEWAY_ADMIN_SECRET.',
             });
           }
-        } catch {
+        } catch (verifyErr) {
+          console.warn('[StickerWave:API] gateway_config_verify_unreachable', {
+            error: verifyErr instanceof Error ? verifyErr.message : String(verifyErr),
+          });
           return jsonResponse(502, {
             code: '6001',
             error: 'Could not reach the specified WhatsApp Gateway URL over HTTPS to verify admin authorization.',
@@ -284,6 +288,10 @@ export async function handleApiCore({ method = 'GET', pathname, headers, bodyTex
       if (method === 'PUT') {
         const parsed = projectSaveSchema.safeParse(parseJsonText(bodyText));
         if (!parsed.success || parsed.data.project.id !== id) {
+          const issues = parsed.success
+            ? ['project.id:mismatch']
+            : parsed.error.issues.map(issue => `${issue.path.join('.')}:${issue.code}`).slice(0, 8);
+          console.warn('[StickerWave:API] project_put_invalid_payload', { code: '4002', projectId: id, issues });
           return jsonResponse(400, { code: '4002', error: 'Invalid project payload' });
         }
         const outcome = await store.upsertProject({
@@ -292,8 +300,18 @@ export async function handleApiCore({ method = 'GET', pathname, headers, bodyTex
           project: parsed.data.project,
           expectedRevision: parsed.data.expectedRevision,
         });
-        if (outcome.status === 403) return jsonResponse(403, { error: 'Forbidden' });
-        if (outcome.status === 409) return jsonResponse(409, { code: '4003', error: 'Revision conflict' });
+        if (outcome.status === 403) {
+          console.warn('[StickerWave:API] project_put_forbidden', { projectId: id });
+          return jsonResponse(403, { error: 'Forbidden' });
+        }
+        if (outcome.status === 409) {
+          console.warn('[StickerWave:API] project_put_revision_conflict', {
+            code: '4003',
+            projectId: id,
+            expectedRevision: parsed.data.expectedRevision ?? null,
+          });
+          return jsonResponse(409, { code: '4003', error: 'Revision conflict' });
+        }
         return jsonResponse(200, { project: outcome.project });
       }
       if (method === 'DELETE') {
@@ -322,6 +340,12 @@ export async function handleApiCore({ method = 'GET', pathname, headers, bodyTex
     return jsonResponse(404, { error: 'Not found' });
   } catch (error) {
     const status = error?.status ?? 500;
+    console.error('[StickerWave:API] unhandled_api_error', {
+      status,
+      method,
+      path: normalizedPath.slice(0, 64),
+      error: error instanceof Error ? error.message : String(error),
+    });
     return jsonResponse(status, { error: status >= 500 ? 'Internal server error' : error.message });
   }
 }
@@ -376,6 +400,12 @@ export async function handleApiRequest(request, response, pathname, dbOrStore) {
     });
   } catch (error) {
     const status = error?.status ?? 500;
+    console.error('[StickerWave:API] request_handler_error', {
+      status,
+      method: request.method ?? 'GET',
+      path: String(pathname || '').slice(0, 64),
+      error: error instanceof Error ? error.message : String(error),
+    });
     res = jsonResponse(status, { error: status >= 500 ? 'Internal server error' : error.message });
   }
   response.writeHead(res.status, {

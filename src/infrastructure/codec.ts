@@ -4,6 +4,7 @@ import wasmURL from '@ffmpeg/core/wasm?url';
 import workerURL from '@ffmpeg/ffmpeg/worker?worker&url';
 import { MAX_SOURCE_DURATION } from '../core/project';
 import { decodeAudio, identify } from './media';
+import { logError, logWarn } from './logger';
 import { encodeWav } from './wav-job';
 
 export const ffmpegSupported = () =>
@@ -36,13 +37,25 @@ async function runFfmpeg(
       await encoder.writeFile(file.name, raw, { signal });
     }
     const result = await encoder.exec([...args, outputName], Math.max(15_000, timeoutMs - 5_000), { signal });
-    if (result) throw new Error('3001');
+    if (result) {
+      logWarn('codec', 'ffmpeg_nonzero_exit', { code: '3001', meta: { outputName, result } });
+      throw new Error('3001');
+    }
     const data = await encoder.readFile(outputName, 'binary', { signal });
-    if (typeof data === 'string' || !data.byteLength) throw new Error('3004');
+    if (typeof data === 'string' || !data.byteLength) {
+      logWarn('codec', 'ffmpeg_empty_output', { code: '3004', meta: { outputName, dataType: typeof data } });
+      throw new Error('3004');
+    }
     return new Blob([new Uint8Array(data)], { type: outputMime });
   } catch (error) {
     signal.throwIfAborted();
-    if (error instanceof Error && error.message === '3004') throw error;
+    const mappedCode = error instanceof Error && error.message === '3004' ? '3004' : '3001';
+    logError('codec', 'ffmpeg_exec_failed', {
+      code: mappedCode,
+      detail: error,
+      meta: { outputName, outputMime, timeoutMs },
+    });
+    if (mappedCode === '3004') throw error;
     throw new Error('3001');
   } finally {
     clearTimeout(timer);
@@ -74,6 +87,7 @@ export async function extractSound(blob: Blob, mime: string, signal: AbortSignal
   } catch (error) {
     signal.throwIfAborted();
     if (error instanceof Error && error.message === '3002') throw error;
+    logWarn('codec', 'extract_native_audio_fallback', { detail: error, meta: { mime, bytes: blob.size } });
     return transcode(blob, mime === 'video/mp4' ? 'mp4' : 'webm', 'wav',
       ['-t', '60', '-ac', '2', '-ar', '48000', '-c:a', 'pcm_s16le'], signal);
   }
