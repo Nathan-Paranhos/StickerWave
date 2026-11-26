@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createDistributionServer } from '../scripts/serve.mjs';
-import { handleWebApiRequest } from '../server/api.mjs';
+import { handleWebApiRequest, runGatewayKeepalive } from '../server/api.mjs';
 import { createBlobsStore } from '../server/stores.mjs';
 
 function createMemoryBlobs() {
@@ -302,4 +302,63 @@ test('Netlify Web API handler and Blobs store handle auth, rewritten paths, proj
   } finally {
     await new Promise(resolve => mockGw.close(resolve));
   }
+});
+
+test('Netlify scheduled gateway-keepalive skips invalid/unconfigured targets and pings /health cleanly', async () => {
+  const keepaliveMod = await import('../netlify/functions/gateway-keepalive.mjs');
+  assert.equal(keepaliveMod.config?.schedule, '*/10 * * * *');
+  assert.equal(typeof keepaliveMod.default, 'function');
+
+  const emptyStore = createBlobsStore(createMemoryBlobs());
+  assert.deepEqual(await runGatewayKeepalive({ store: emptyStore, env: {} }), {
+    ok: true,
+    skipped: true,
+    reason: 'unconfigured',
+  });
+  assert.deepEqual(await runGatewayKeepalive({ env: { WHATSAPP_GATEWAY_URL: 'https://169.254.169.254' } }), {
+    ok: true,
+    skipped: true,
+    reason: 'invalid_gateway_url',
+  });
+  assert.deepEqual(
+    await runGatewayKeepalive({ env: { WHATSAPP_GATEWAY_URL: 'http://127.0.0.1:3001' }, allowLocalHttp: false }),
+    { ok: true, skipped: true, reason: 'invalid_gateway_url' },
+  );
+
+  // Store fallback when WHATSAPP_GATEWAY_URL env is empty
+  await emptyStore.setGatewayConfig({
+    gatewayUrl: 'https://blobs-gateway.onrender.com',
+    updatedAt: new Date().toISOString(),
+  });
+  const seenTargets: string[] = [];
+  const storeRes = await runGatewayKeepalive({
+    store: emptyStore,
+    env: {},
+    fetchImpl: (async (url: string) => {
+      seenTargets.push(url);
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch,
+  });
+  assert.deepEqual(seenTargets, ['https://blobs-gateway.onrender.com/health']);
+  assert.deepEqual(storeRes, {
+    ok: true,
+    skipped: false,
+    status: 200,
+    targetHost: 'blobs-gateway.onrender.com',
+  });
+
+  // Env var takes precedence + offline resilience
+  const envFail = await runGatewayKeepalive({
+    store: emptyStore,
+    env: { WHATSAPP_GATEWAY_URL: 'https://stickerwave-gateway.onrender.com/' },
+    fetchImpl: (async () => {
+      throw new Error('ECONNREFUSED');
+    }) as typeof fetch,
+  });
+  assert.deepEqual(envFail, {
+    ok: false,
+    skipped: false,
+    targetHost: 'stickerwave-gateway.onrender.com',
+    error: 'ECONNREFUSED',
+  });
 });

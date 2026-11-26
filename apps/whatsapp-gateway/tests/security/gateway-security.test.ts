@@ -41,7 +41,11 @@ test('Gateway security controls enforce admin auth, strict CORS, rate limiting, 
     assert.equal(res.status, 401);
   }
 
-  // 2) CORS rejects disallowed origin cleanly
+  // 2) CORS rejects disallowed origin cleanly + HEAD /health works for uptime monitors
+  const headHealth = await fetch(`${baseUrl}/health`, { method: 'HEAD' });
+  assert.equal(headHealth.status, 200);
+  assert.match(headHealth.headers.get('content-type') || '', /application\/json/);
+  assert.equal(await headHealth.text(), '');
   const badCors = await fetch(`${baseUrl}/health`, { headers: { Origin: 'https://evil.example.com' } });
   assert.equal(badCors.status, 403);
   const okCors = await fetch(`${baseUrl}/health`, { headers: { Origin: 'https://stickerwave.netlify.app' } });

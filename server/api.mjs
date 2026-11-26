@@ -320,6 +320,41 @@ export async function handleApiCore({ method = 'GET', pathname, headers, bodyTex
   }
 }
 
+export async function runGatewayKeepalive({
+  store = null,
+  env = process.env,
+  fetchImpl = fetch,
+  allowLocalHttp = false,
+  timeoutMs = 12_000,
+} = {}) {
+  const envUrl = (env?.WHATSAPP_GATEWAY_URL || '').trim().replace(/\/+$/, '');
+  const stored = !envUrl && typeof store?.getGatewayConfig === 'function' ? await store.getGatewayConfig() : null;
+  const rawUrl = envUrl || stored?.gatewayUrl || '';
+  if (!rawUrl) {
+    return { ok: true, skipped: true, reason: 'unconfigured' };
+  }
+  const cleanUrl = validatePublicGatewayUrl(rawUrl, allowLocalHttp);
+  if (!cleanUrl) {
+    return { ok: true, skipped: true, reason: 'invalid_gateway_url' };
+  }
+  const targetHost = new URL(cleanUrl).host;
+  try {
+    const res = await fetchImpl(`${cleanUrl}/health`, {
+      method: 'GET',
+      headers: { 'User-Agent': 'StickerWave-Keepalive/1.0' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return { ok: res.ok, skipped: false, status: res.status, targetHost };
+  } catch (err) {
+    return {
+      ok: false,
+      skipped: false,
+      targetHost,
+      error: err instanceof Error ? err.message : 'keepalive_request_failed',
+    };
+  }
+}
+
 export async function handleApiRequest(request, response, pathname, dbOrStore) {
   const store = isDataStore(dbOrStore) ? dbOrStore : createPrismaStore(dbOrStore);
   let res;

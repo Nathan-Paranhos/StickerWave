@@ -82,13 +82,13 @@ export interface GatewayRuntime {
   stop(): Promise<void>;
 }
 
-function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
+function sendJson(res: ServerResponse, statusCode: number, body: unknown, headOnly = false): void {
   const payload = JSON.stringify(body);
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(payload),
   });
-  res.end(payload);
+  res.end(headOnly ? undefined : payload);
 }
 
 function sendError(res: ServerResponse, statusCode: number, code: string, message: string, retryable = false): void {
@@ -159,8 +159,8 @@ export function createGatewayRuntime(
       return;
     }
 
-    // Health and readiness probes stay exempt from tight client rate limits
-    if (method === 'GET' && pathname === '/health') {
+    // Health and readiness probes stay exempt from tight client rate limits (HEAD supported for external uptime monitors)
+    if ((method === 'GET' || method === 'HEAD') && pathname === '/health') {
       const body: GatewayHealthResponse = {
         ok: true,
         service: 'stickerwave-whatsapp-gateway',
@@ -168,7 +168,7 @@ export function createGatewayRuntime(
         timestamp: new Date().toISOString(),
         uptimeSec: Math.round((Date.now() - startedAt) / 1000),
       };
-      sendJson(res, 200, body);
+      sendJson(res, 200, body, method === 'HEAD');
       return;
     }
 
