@@ -1,5 +1,8 @@
 import type {
+  AddToWhatsAppResponse,
+  ClientPlatformTarget,
   CloudMediaFormat,
+  EncodedSoundSticker,
   GatewayCapabilitiesResponse,
   GatewayHealthResponse,
   GatewayMetricsSnapshot,
@@ -7,6 +10,7 @@ import type {
   PhoneValidationResult,
   RecipientAuthorizationChallenge,
   RecipientAuthorizationStatusResponse,
+  SoundStickerProtocolStrategy,
   StickerAudioOptions,
   StickerJobEvent,
   StickerSendJobSummary,
@@ -309,6 +313,79 @@ export async function convertMediaViaCloudGateway(params: {
     wastickers: 'wastickers',
   };
   return { blob, extension: extMap[params.format] };
+}
+
+export function detectClientPlatform(): ClientPlatformTarget {
+  if (typeof navigator === 'undefined') return 'web';
+  const ua = navigator.userAgent || '';
+  if (/Android/i.test(ua)) return 'android';
+  if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
+  if (typeof window !== 'undefined' && window.matchMedia?.('(display-mode: standalone)').matches) return 'pwa';
+  return 'web';
+}
+
+export async function processStickerViaGateway(params: {
+  visualBlob: Blob;
+  visualName: string;
+  audioBlob?: Blob | null;
+  audioName?: string | null;
+  packName?: string;
+  emojis?: string[];
+  protocolStrategy?: SoundStickerProtocolStrategy;
+  shapeOptions?: Partial<StickerShapeOptions>;
+  audioOptions?: StickerAudioOptions;
+  signal?: AbortSignal;
+}): Promise<{ ok: true; sticker: EncodedSoundSticker }> {
+  const form = new FormData();
+  form.append('visual', params.visualBlob, params.visualName);
+  if (params.audioBlob && params.audioName) {
+    form.append('audio', params.audioBlob, params.audioName);
+  }
+  if (params.packName) form.append('packName', params.packName);
+  if (params.emojis?.length) form.append('emojis', params.emojis.join(','));
+  if (params.protocolStrategy) form.append('protocolStrategy', params.protocolStrategy);
+  if (params.shapeOptions) form.append('shapeOptions', JSON.stringify(params.shapeOptions));
+  if (params.audioOptions) form.append('audioOptions', JSON.stringify(params.audioOptions));
+
+  return gwFetch('/api/stickers/process', {
+    method: 'POST',
+    body: form,
+    signal: params.signal,
+  });
+}
+
+export async function addStickerToWhatsAppViaGateway(params: {
+  platform?: ClientPlatformTarget;
+  recipientPhone?: string;
+  visualBlob: Blob;
+  visualName: string;
+  audioBlob?: Blob | null;
+  audioName?: string | null;
+  packName?: string;
+  emojis?: string[];
+  protocolStrategy?: SoundStickerProtocolStrategy;
+  shapeOptions?: Partial<StickerShapeOptions>;
+  audioOptions?: StickerAudioOptions;
+  signal?: AbortSignal;
+}): Promise<AddToWhatsAppResponse> {
+  const form = new FormData();
+  form.append('platform', params.platform ?? detectClientPlatform());
+  if (params.recipientPhone) form.append('recipientPhone', params.recipientPhone);
+  form.append('visual', params.visualBlob, params.visualName);
+  if (params.audioBlob && params.audioName) {
+    form.append('audio', params.audioBlob, params.audioName);
+  }
+  if (params.packName) form.append('packName', params.packName);
+  if (params.emojis?.length) form.append('emojis', params.emojis.join(','));
+  if (params.protocolStrategy) form.append('protocolStrategy', params.protocolStrategy);
+  if (params.shapeOptions) form.append('shapeOptions', JSON.stringify(params.shapeOptions));
+  if (params.audioOptions) form.append('audioOptions', JSON.stringify(params.audioOptions));
+
+  return gwFetch<AddToWhatsAppResponse>('/api/stickers/add-to-whatsapp', {
+    method: 'POST',
+    body: form,
+    signal: params.signal,
+  });
 }
 
 export function validatePhoneWithGateway(phone: string, defaultCountry: 'BR' | 'US' = 'BR'): Promise<PhoneValidationResult> {

@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { DisconnectReason, type BaileysEventEmitter, type proto } from '@whiskeysockets/baileys';
+import { DisconnectReason, proto, type BaileysEventEmitter } from '@whiskeysockets/baileys';
 import { createGatewayRuntime } from '../../src/http/server.js';
 import { GatewayDatabase } from '../../src/storage/database.js';
 import type { MinimalWASocket } from '../../src/whatsapp/connection-manager.js';
@@ -256,11 +256,23 @@ test('Gateway end-to-end flow: QR connect, encrypted session, WA opt-in, sound s
   assert.ok((finalJob?.oggBytes ?? 0) > 100);
   assert.equal(sock.relayedMessages.length, 1);
 
-  // Verify the actual Message emitted by ConnectionManager has field 26 AudioMessage inside StickerMessage
+  // Verify the actual Message emitted by ConnectionManager carries valid envelope-134 (default) SoundSticker protobuf
   const relayed = sock.relayedMessages[0]!;
-  assert.ok(relayed.message.stickerMessage);
-  assert.equal(relayed.message.stickerMessage?.width, 512);
-  assert.equal(relayed.message.stickerMessage?.height, 512);
+  const relayedTyped = relayed.message as proto.Message & {
+    audioStickerMessage?: { message?: { stickerMessage?: proto.Message.IStickerMessage } };
+  };
+  const stickerInner = relayedTyped.audioStickerMessage?.message?.stickerMessage ?? relayed.message.stickerMessage;
+  assert.ok(stickerInner);
+  assert.equal(stickerInner.width, 512);
+  assert.equal(stickerInner.height, 512);
+  const wireCheck = verifyEncodedSoundStickerMessage(proto.Message.encode(relayed.message).finish());
+  assert.equal(wireCheck.valid, true);
+  assert.equal(wireCheck.strategy, 'envelope-134');
+
+  // Verify un-versioned §12 alias /api/whatsapp/status alongside /api/v1/*
+  const aliasStatusRes = await fetch(`${baseUrl}/api/whatsapp/status`, { headers: adminHeaders });
+  assert.equal(aliasStatusRes.status, 200);
+  assert.equal(((await aliasStatusRes.json()) as { status: string }).status, 'CONNECTED');
 
   // Simulate WhatsApp DELIVERY_ACK (status = 3)
   sock.emitter.emit('messages.update', [

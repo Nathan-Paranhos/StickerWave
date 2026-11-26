@@ -1,7 +1,16 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { CloudMediaFormat, StickerAudioOptions, StickerShapeOptions } from '@stickerwave/contracts';
+import type {
+  CloudMediaFormat,
+  EncodedSoundSticker,
+  SoundStickerProtocolStrategy,
+  StickerAudioOptions,
+  StickerMetadata,
+  StickerShapeOptions,
+  StickerType,
+  StickerValidationReport,
+} from '@stickerwave/contracts';
 import type { GatewayConfig } from '../config.js';
 import { createStoredZip } from '../utils/zip-store.js';
 import { AnimationProcessor } from './animation-processor.js';
@@ -9,6 +18,8 @@ import type { FFmpegAdapter } from './ffmpeg-adapter.js';
 import { AudioProcessor, type ProcessedAudioResult } from './audio-processor.js';
 import { ImageProcessor, type ProcessedVisualResult } from './image-processor.js';
 import { sniffMediaBytes, type DetectedMediaKind } from './magic-bytes.js';
+import { validateEncodedSticker } from './sticker-validator.js';
+import { computeSha256Base64, injectWhatsAppExif } from './webp-exif.js';
 import { extractAnimatedWebpToFfconcat } from './webp-frames.js';
 import { inspectWebpBuffer } from './webp-inspector.js';
 
@@ -19,6 +30,8 @@ export interface ProcessStickerMediaRequest {
   audioOriginalName?: string;
   shapeOptions?: Partial<StickerShapeOptions>;
   audioOptions?: StickerAudioOptions;
+  metadata?: Partial<StickerMetadata>;
+  protocolStrategy?: SoundStickerProtocolStrategy;
   signal?: AbortSignal;
   onStage?: (stage: 'VALIDATING' | 'PROCESSING_VISUAL' | 'PROCESSING_AUDIO' | 'ENCODING', progress: number, label: string) => void;
 }
@@ -32,6 +45,8 @@ export interface ProcessStickerMediaOutput {
   secondsField: number;
   waveform: Uint8Array;
   visualInspection: ProcessedVisualResult['inspection'];
+  exifMeta: StickerMetadata | null;
+  validation: StickerValidationReport;
   audioStats: Pick<ProcessedAudioResult, 'codec' | 'sampleRate' | 'peakDb' | 'meanDb'>;
 }
 
@@ -222,22 +237,160 @@ export class CompositionPipeline {
         req.signal,
       );
 
-      req.onStage?.('ENCODING', 65, 'Validando pacotes WebP e Ogg/Opus');
+      req.onStage?.('ENCODING', 65, 'Injetando EXIF 0x5741 e validando pacotes WebP + Ogg/Opus');
+      const soundSha256 = computeSha256Base64(audioRes.buffer);
+      const durationMs = Math.max(500, Math.round(audioRes.durationSec * 1000));
+      const webpWithExif = injectWhatsAppExif(visualRes.buffer, {
+        packId: req.metadata?.packId,
+        packName: req.metadata?.packName || 'StickerWave',
+        packPublisher: req.metadata?.packPublisher || 'Nathan Paranhos',
+        emojis: req.metadata?.emojis?.length ? req.metadata.emojis : ['🔊'],
+        soundSha256,
+        forceAnimatedDurationMs: visualRes.inspection.animated ? undefined : durationMs,
+      });
+      const finalWebp =
+        webpWithExif.byteLength <= this.config.maxStickerBytes ? webpWithExif : visualRes.buffer;
+      const finalInspection = inspectWebpBuffer(finalWebp) ?? visualRes.inspection;
+      const validation = validateEncodedSticker({
+        webpBuffer: finalWebp,
+        oggBuffer: audioRes.buffer,
+        stickerType: 'SOUND',
+        durationMs,
+        maxWebpStaticBytes: this.config.maxStaticStickerBytes,
+        maxWebpAnimatedBytes: this.config.maxStickerBytes,
+        maxAudioBytes: this.config.maxAudioBytes,
+        maxDurationMs: this.config.maxSeconds * 1000,
+      });
 
       return {
-        webpBuffer: visualRes.buffer,
+        webpBuffer: finalWebp,
         oggBuffer: audioRes.buffer,
-        isAnimated: visualRes.inspection.animated,
+        isAnimated: finalInspection.animated,
         durationSec: audioRes.durationSec,
-        durationMs: Math.round(audioRes.durationSec * 1000),
+        durationMs,
         secondsField: audioRes.secondsField,
         waveform: audioRes.waveform,
-        visualInspection: visualRes.inspection,
+        visualInspection: finalInspection,
+        exifMeta: finalInspection.exifMeta ?? null,
+        validation,
         audioStats: {
           codec: audioRes.codec,
           sampleRate: audioRes.sampleRate,
           peakDb: audioRes.peakDb,
           meanDb: audioRes.meanDb,
+        },
+      };
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  /**
+   * Produces a unified `EncodedSoundSticker` artifact for STATIC, ANIMATED, or SOUND stickers
+   * cleanly separated from WhatsApp network transport.
+   */
+  async processInternalSticker(req: ProcessStickerMediaRequest): Promise<{
+    encodedSticker: EncodedSoundSticker;
+    webpBuffer: Buffer;
+    oggBuffer: Buffer | null;
+  }> {
+    const hasAudio = Boolean(req.audioBytes && req.audioBytes.byteLength > 0);
+    const protocolStrategy: SoundStickerProtocolStrategy =
+      req.protocolStrategy ?? this.config.soundStickerProtocol;
+
+    if (hasAudio) {
+      const processed = await this.process(req);
+      return {
+        webpBuffer: processed.webpBuffer,
+        oggBuffer: processed.oggBuffer,
+        encodedSticker: {
+          stickerType: 'SOUND',
+          protocolStrategy,
+          width: processed.visualInspection.width ?? 512,
+          height: processed.visualInspection.height ?? 512,
+          animated: processed.isAnimated,
+          hasAudio: true,
+          durationMs: processed.durationMs,
+          webpBytes: processed.webpBuffer.byteLength,
+          oggBytes: processed.oggBuffer.byteLength,
+          exifMeta: processed.exifMeta,
+          waveform: Array.from(processed.waveform),
+          validation: processed.validation,
+          webpBase64: processed.webpBuffer.toString('base64'),
+          oggBase64: processed.oggBuffer.toString('base64'),
+        },
+      };
+    }
+
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'stickerwave-core-'));
+    try {
+      const prepared = await this.prepareVisualInput(tempDir, req.visualBytes, req.signal);
+      let audioRes: ProcessedAudioResult | null = null;
+      if (prepared.visualKind === 'mp4' || prepared.visualKind === 'webm') {
+        audioRes = await this.prepareAudioInput(
+          tempDir,
+          null,
+          prepared.visualPath,
+          prepared.visualKind,
+          req.audioOptions,
+          req.signal,
+        ).catch((err) => {
+          if (err instanceof Error && err.message.includes('no audio stream')) return null;
+          throw err;
+        });
+      }
+
+      const defaultDur = audioRes?.durationSec ?? prepared.durationSec ?? 3;
+      const visualRes = await this.encodeVisualToWebp(tempDir, prepared, defaultDur, req.shapeOptions, req.signal);
+      const stickerType: StickerType = audioRes
+        ? 'SOUND'
+        : visualRes.inspection.animated
+          ? 'ANIMATED'
+          : 'STATIC';
+      const durationMs = Math.round((audioRes?.durationSec ?? visualRes.inspection.durationSec) * 1000);
+      const soundSha256 = audioRes ? computeSha256Base64(audioRes.buffer) : null;
+      const webpWithExif = injectWhatsAppExif(visualRes.buffer, {
+        packId: req.metadata?.packId,
+        packName: req.metadata?.packName || 'StickerWave',
+        packPublisher: req.metadata?.packPublisher || 'Nathan Paranhos',
+        emojis: req.metadata?.emojis?.length ? req.metadata.emojis : audioRes ? ['🔊'] : ['✨'],
+        soundSha256,
+        forceAnimatedDurationMs:
+          audioRes && !visualRes.inspection.animated ? Math.max(500, durationMs) : undefined,
+      });
+      const sizeCap =
+        stickerType === 'STATIC' ? this.config.maxStaticStickerBytes : this.config.maxStickerBytes;
+      const finalWebp = webpWithExif.byteLength <= sizeCap ? webpWithExif : visualRes.buffer;
+      const finalInspection = inspectWebpBuffer(finalWebp) ?? visualRes.inspection;
+      const validation = validateEncodedSticker({
+        webpBuffer: finalWebp,
+        oggBuffer: audioRes?.buffer ?? null,
+        stickerType,
+        durationMs,
+        maxWebpStaticBytes: this.config.maxStaticStickerBytes,
+        maxWebpAnimatedBytes: this.config.maxStickerBytes,
+        maxAudioBytes: this.config.maxAudioBytes,
+        maxDurationMs: this.config.maxSeconds * 1000,
+      });
+
+      return {
+        webpBuffer: finalWebp,
+        oggBuffer: audioRes?.buffer ?? null,
+        encodedSticker: {
+          stickerType,
+          protocolStrategy,
+          width: finalInspection.width ?? 512,
+          height: finalInspection.height ?? 512,
+          animated: finalInspection.animated,
+          hasAudio: Boolean(audioRes),
+          durationMs,
+          webpBytes: finalWebp.byteLength,
+          oggBytes: audioRes?.buffer.byteLength ?? 0,
+          exifMeta: finalInspection.exifMeta ?? null,
+          waveform: audioRes ? Array.from(audioRes.waveform) : [],
+          validation,
+          webpBase64: finalWebp.toString('base64'),
+          oggBase64: audioRes ? audioRes.buffer.toString('base64') : null,
         },
       };
     } finally {
@@ -301,8 +454,15 @@ export class CompositionPipeline {
       if (req.format === 'webp') {
         const defaultDur = audioRes?.durationSec ?? prepared.durationSec ?? 3;
         const visualRes = await this.encodeVisualToWebp(tempDir, prepared, defaultDur, req.shapeOptions, req.signal);
+        const withExif = injectWhatsAppExif(visualRes.buffer, {
+          packName: req.title || 'StickerWave',
+          packPublisher: 'Nathan Paranhos',
+          emojis: visualRes.inspection.animated ? ['✨'] : ['🙂'],
+        });
+        const cap = visualRes.inspection.animated ? this.config.maxStickerBytes : this.config.maxStaticStickerBytes;
+        const finalWebp = withExif.byteLength <= cap ? withExif : visualRes.buffer;
         return {
-          buffer: visualRes.buffer,
+          buffer: finalWebp,
           mimeType: 'image/webp',
           extension: 'webp',
           isAnimated: visualRes.inspection.animated,
@@ -313,6 +473,13 @@ export class CompositionPipeline {
       if (req.format === 'wastickers') {
         const defaultDur = audioRes?.durationSec ?? prepared.durationSec ?? 3;
         const visualRes = await this.encodeVisualToWebp(tempDir, prepared, defaultDur, req.shapeOptions, req.signal);
+        const withExif = injectWhatsAppExif(visualRes.buffer, {
+          packName: req.title || 'StickerWave',
+          packPublisher: 'Nathan Paranhos',
+          emojis: ['✨'],
+        });
+        const cap = visualRes.inspection.animated ? this.config.maxStickerBytes : this.config.maxStaticStickerBytes;
+        const finalWebp = withExif.byteLength <= cap ? withExif : visualRes.buffer;
         const trayPath = path.join(tempDir, 'tray.png');
         await this.ffmpeg.run(
           [
@@ -330,11 +497,11 @@ export class CompositionPipeline {
         const title = (req.title || 'StickerWave').trim().slice(0, 60) || 'StickerWave';
         const zipBuf = createStoredZip([
           { name: 'title.txt', data: Buffer.from(title, 'utf8') },
-          { name: 'author.txt', data: Buffer.from('StickerWave', 'utf8') },
+          { name: 'author.txt', data: Buffer.from('Nathan Paranhos (StickerWave)', 'utf8') },
           { name: 'tray.png', data: trayBytes },
-          { name: '1.webp', data: visualRes.buffer },
-          { name: '2.webp', data: visualRes.buffer },
-          { name: '3.webp', data: visualRes.buffer },
+          { name: '1.webp', data: finalWebp },
+          { name: '2.webp', data: finalWebp },
+          { name: '3.webp', data: finalWebp },
         ]);
         return {
           buffer: zipBuf,

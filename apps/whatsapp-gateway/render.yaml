@@ -21,6 +21,8 @@ services:
         value: https://stickerwave.netlify.app
       - key: ENABLE_SOUND_STICKERS
         value: "true"
+      - key: SOUND_STICKER_PROTOCOL
+        value: "envelope-134"
       - key: ENABLE_WA_BOT
         value: "false"
       - key: GATEWAY_ADMIN_SECRET

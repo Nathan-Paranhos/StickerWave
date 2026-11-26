@@ -581,11 +581,17 @@ function Editor({ session, query }: { session: Session; query: string }) {
       </section>
     </div>
     {library && <Modal title={copy.catalogTitle} close={() => setLibrary(false)} className="library-modal"><SoundLibrary select={sound => void choose(sound)} /></Modal>}
-    {exporting && <ExportDialog project={project} assets={assets} frame={preview.position} initialFocus={exportFocus} close={() => setExporting(false)} />}
+    {exporting && <ExportDialog project={project} assets={assets} frame={preview.position} initialFocus={exportFocus} onOpenSendModal={() => { setExporting(false); setSendingWa(true); }} close={() => setExporting(false)} />}
     {sendingWa && <SendToWhatsAppModal project={project} assets={assets} close={() => setSendingWa(false)} onFallbackLocalExport={() => { setSendingWa(false); setExportFocus('whatsapp'); setExporting(true); }} />}
     {diagnostics && <Modal title={copy.diagnostic} close={() => setDiagnostics(false)}>
       <p>{copy.noUpload}</p>
       <dl className="capabilities">{Object.entries(capabilities()).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ? copy.supported : copy.unavailable}</dd></div>)}</dl>
+      <p className="footer-credit">
+        {copy.developedBy}{' '}
+        <a className="credit-link" href="https://nathan-paranhos.com.br/" target="_blank" rel="noopener noreferrer">
+          Nathan Paranhos (nathan-paranhos.com.br)
+        </a>
+      </p>
       <button className="button button-outline" onClick={() => void navigator.clipboard.writeText(JSON.stringify({
         version: '2.1.0-beta.1', capabilities: capabilities(), errors: historyRef.current.map(code => `SW-${code}`),
       }, null, 2)).then(() => { setMessage(copy.copied); setDiagnostics(false); }).catch(() => { report('4002'); setDiagnostics(false); })}>{copy.copyDiagnostic}</button>

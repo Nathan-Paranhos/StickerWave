@@ -8,6 +8,7 @@ import {
   ensureStickerAudioProtocolPatch,
   getPendingAttachmentCount,
   inspectRawStickerAudio,
+  MESSAGE_AUDIO_STICKER_FIELD,
   MESSAGE_STICKER_FIELD,
   SoundStickerProtocol,
   STICKER_AUDIO_FIELD,
@@ -41,13 +42,59 @@ test('SoundStickerProtocol uses protobuf field 26 wire tag 210 cleanly and idemp
   assert.ok(['native', 'patched-encoder'].includes(protocol.capability.mode));
 });
 
-test('SoundStickerProtocol embeds AudioMessage in field 26 and leaves unrelated stickers clean', () => {
-  const protocol = new SoundStickerProtocol('7.0.0-rc14');
+test('SoundStickerProtocol Strategy B (envelope-134) & Strategy A (sticker-26) round-trip cleanly without node_modules edits', () => {
+  const protocol134 = new SoundStickerProtocol('7.0.0-rc14', 'envelope-134');
+  const protocol26 = new SoundStickerProtocol('7.0.0-rc14', 'sticker-26');
   const sha = crypto.randomBytes(32);
   const encSha = crypto.randomBytes(32);
   const audio = makeAudioPayload(4, 9876);
 
-  const { encoded, verification } = protocol.serializeAndVerifySynthetic({
+  // Strategy B: Message(#134 audioStickerMessage) -> FutureProof(#1) -> StickerMessage(#24/#25/#26)
+  const { encoded: encoded134, verification: ver134 } = protocol134.serializeAndVerifySynthetic({
+    sticker: {
+      url: 'https://mmg.whatsapp.net/o1/v/t62.15575-24/test-sticker-134',
+      directPath: '/o1/v/t62.15575-24/test-sticker-134',
+      fileSha256: sha,
+      fileEncSha256: encSha,
+      mediaKey: crypto.randomBytes(32),
+      mimetype: 'image/webp',
+      fileLength: 42_000,
+      width: 512,
+      height: 512,
+      isAnimated: true,
+    },
+    audio,
+    seconds: 4,
+    waveform: audio.waveform,
+    emojis: ['🔊'],
+  });
+
+  assert.equal(ver134.valid, true);
+  assert.equal(ver134.strategy, 'envelope-134');
+  assert.deepEqual(ver134.emojis, ['🔊']);
+  assert.equal(ver134.premium, 0);
+  assert.equal(ver134.decodedAudio?.ptt, false);
+  assert.equal(ver134.decodedAudio?.seconds, 4);
+  assert.equal(getPendingAttachmentCount(), 0);
+
+  // Outer wire structure & runtime proto.Message.decode round-trip
+  const outer134 = parseRawProtoFields(encoded134);
+  assert.ok(findProtoBytesField(outer134, MESSAGE_AUDIO_STICKER_FIELD));
+  const decodedOuter = proto.Message.decode(encoded134) as proto.Message & {
+    audioStickerMessage?: {
+      message?: {
+        stickerMessage?: proto.Message.StickerMessage & {
+          audioMessage?: proto.Message.AudioMessage;
+          emojis?: string[];
+        };
+      };
+    };
+  };
+  assert.equal(decodedOuter.audioStickerMessage?.message?.stickerMessage?.audioMessage?.seconds, 4);
+  assert.deepEqual(decodedOuter.audioStickerMessage?.message?.stickerMessage?.emojis, ['🔊']);
+
+  // Strategy A: Direct Message.stickerMessage (#26) -> StickerMessage.audioMessage (#26)
+  const { encoded: encoded26, verification: ver26 } = protocol26.serializeAndVerifySynthetic({
     sticker: {
       url: 'https://mmg.whatsapp.net/o1/v/t62.15575-24/test-sticker',
       directPath: '/o1/v/t62.15575-24/test-sticker',
@@ -63,27 +110,28 @@ test('SoundStickerProtocol embeds AudioMessage in field 26 and leaves unrelated 
     audio,
     seconds: 4,
     waveform: audio.waveform,
+    strategy: 'sticker-26',
   });
 
-  assert.equal(verification.valid, true);
-  assert.ok((verification.embeddedAudioBytes ?? 0) > 40);
-  assert.equal(verification.decodedAudio?.seconds, 4);
-  assert.equal(verification.decodedAudio?.ptt, true);
+  assert.equal(ver26.valid, true);
+  assert.equal(ver26.strategy, 'sticker-26');
+  assert.ok((ver26.embeddedAudioBytes ?? 0) > 40);
+  assert.equal(ver26.decodedAudio?.seconds, 4);
+  assert.equal(ver26.decodedAudio?.ptt, true);
   assert.equal(getPendingAttachmentCount(), 0);
 
-  // Verify raw wire structure on outer Message and inner StickerMessage
-  const outer = parseRawProtoFields(encoded);
-  const stickerRaw = findProtoBytesField(outer, MESSAGE_STICKER_FIELD);
+  const outer26 = parseRawProtoFields(encoded26);
+  const stickerRaw = findProtoBytesField(outer26, MESSAGE_STICKER_FIELD);
   assert.ok(stickerRaw?.payload);
   const audioFields = parseRawProtoFields(stickerRaw.payload).filter((f) => f.field === STICKER_AUDIO_FIELD);
   assert.equal(audioFields.length, 1);
 
-  const parsedIncoming = inspectRawStickerAudio(stickerRaw.payload);
+  const parsedIncoming = inspectRawStickerAudio(stickerRaw.payload, 'sticker-26');
   assert.ok(parsedIncoming);
   assert.equal(parsedIncoming.decodedAudio.seconds, 4);
   assert.equal(parsedIncoming.decodedAudio.ptt, 1);
 
-  // Plain sticker after serialization MUST NOT have audio field 26
+  // Plain sticker after serialization MUST NOT have audio field 26 or #134 envelope
   const plainMsg = proto.Message.create({
     stickerMessage: {
       fileSha256: sha,

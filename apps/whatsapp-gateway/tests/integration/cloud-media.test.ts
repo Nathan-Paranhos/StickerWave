@@ -115,6 +115,50 @@ test('Cloud Media Engine operates with WhatsApp Bot disabled (ENABLE_WA_BOT=fals
   assert.ok(packBuf.includes(Buffer.from('Meu Pack Cloud', 'utf8')));
   assert.ok(packBuf.includes(Buffer.from('tray.png', 'utf8')));
   assert.ok(packBuf.includes(Buffer.from('1.webp', 'utf8')));
+
+  // 6) Canonical /api/stickers/process returns validated EXIF 0x5741 EncodedSoundSticker + sound-sha256
+  const processForm = new FormData();
+  processForm.append('visual', new Blob([pngBytes], { type: 'image/png' }), 'sticker.png');
+  processForm.append('audio', new Blob([wavBytes], { type: 'audio/wav' }), 'pop.wav');
+  processForm.append('packName', 'StickerWave Core Test');
+  const processRes = await fetch(`${baseUrl}/api/stickers/process`, { method: 'POST', headers: corsHeaders, body: processForm });
+  assert.equal(processRes.status, 200);
+  const processJson = (await processRes.json()) as {
+    ok: boolean;
+    sticker: {
+      stickerType: string;
+      animated: boolean;
+      hasAudio: boolean;
+      exifMeta: { packPublisher: string; soundSha256: string } | null;
+      validation: { valid: boolean; hasExif0x5741: boolean; soundSha256MatchesAudio: boolean };
+    };
+  };
+  assert.equal(processJson.ok, true);
+  assert.equal(processJson.sticker.stickerType, 'SOUND');
+  assert.equal(processJson.sticker.animated, true);
+  assert.equal(processJson.sticker.hasAudio, true);
+  assert.equal(processJson.sticker.exifMeta?.packPublisher, 'Nathan Paranhos');
+  assert.equal(processJson.sticker.validation.valid, true);
+  assert.equal(processJson.sticker.validation.hasExif0x5741, true);
+  assert.equal(processJson.sticker.validation.soundSha256MatchesAudio, true);
+
+  // 7) Canonical /api/stickers/add-to-whatsapp returns honest bridge strategy when bot is off
+  const bridgeForm = new FormData();
+  bridgeForm.append('platform', 'android');
+  bridgeForm.append('visual', new Blob([pngBytes], { type: 'image/png' }), 'sticker.png');
+  bridgeForm.append('audio', new Blob([wavBytes], { type: 'audio/wav' }), 'pop.wav');
+  const bridgeRes = await fetch(`${baseUrl}/api/stickers/add-to-whatsapp`, { method: 'POST', headers: corsHeaders, body: bridgeForm });
+  assert.equal(bridgeRes.status, 200);
+  const bridgeJson = (await bridgeRes.json()) as {
+    ok: boolean;
+    strategy: string;
+    supportsAudioInNativePackApi: boolean;
+    canDirectSendViaGateway: boolean;
+  };
+  assert.equal(bridgeJson.ok, true);
+  assert.equal(bridgeJson.strategy, 'wa-bot-relay');
+  assert.equal(bridgeJson.supportsAudioInNativePackApi, false);
+  assert.equal(bridgeJson.canDirectSendViaGateway, false);
 });
 
 test('zip-store and animated WebP ffconcat extractor produce valid archives and frame manifests', async (t) => {

@@ -41,6 +41,18 @@ export function buildOpenApiDocument(config: GatewayConfig) {
           responses: { '200': { description: 'Rendered media binary' } },
         },
       },
+      '/api/stickers/process': {
+        post: {
+          summary: 'Process composition via StickerWave Core (EXIF 0x5741, static/animated/sound validation)',
+          responses: { '200': { description: 'EncodedSoundSticker JSON summary + validated WebP/Ogg base64' } },
+        },
+      },
+      '/api/stickers/add-to-whatsapp': {
+        post: {
+          summary: 'Evaluate platform bridge (Android/iOS/Web/PWA) and optionally enqueue WhatsApp relay',
+          responses: { '200': { description: 'AddToWhatsAppResponse with bridge strategy and pack manifest or relay job' } },
+        },
+      },
       '/api/v1/admin/whatsapp/status': {
         get: { security: [{ AdminBearer: [] }], summary: 'Central bot WhatsApp connection status' },
       },

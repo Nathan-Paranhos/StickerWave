@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Archive, AudioLines, Check, Cloud, Copy, Download, ExternalLink, Film, Image, MessageCircle, Package, Share2 } from 'lucide-react';
-import type { CloudMediaFormat, GatewayCapabilitiesResponse } from '@stickerwave/contracts';
+import { Archive, AudioLines, Check, Cloud, Copy, Download, ExternalLink, Film, Image, MessageCircle, Package, Play, Share2, Square, Volume2 } from 'lucide-react';
+import type { AddToWhatsAppResponse, CloudMediaFormat, GatewayCapabilitiesResponse } from '@stickerwave/contracts';
 import { useApp } from '../app/context';
 import { Modal, Notice } from '../app/shared';
 import { imagePngExport, mp4Supported, renderExport, type ExportFormat, type ExportResult } from '../infrastructure/export';
-import { convertMediaViaCloudGateway, probeCloudGateway, renderProjectMediaForGateway } from '../infrastructure/gateway';
+import { addStickerToWhatsAppViaGateway, convertMediaViaCloudGateway, probeCloudGateway, renderProjectMediaForGateway } from '../infrastructure/gateway';
 import { videoFormats } from '../infrastructure/media';
 import { audioTracks, motion, projectDuration, visualLayers, type Project, type StoredAsset } from '../core/project';
 import { errorCode, type ErrorCode } from '../locales';
@@ -14,6 +14,7 @@ type Props = {
   assets: ReadonlyMap<string, StoredAsset>;
   frame: number;
   initialFocus?: 'whatsapp' | 'all';
+  onOpenSendModal?: () => void;
   close: () => void;
 };
 type KitResult = { imageUrl: string; imageFile: File; audioUrl: string; audioFile: File };
@@ -23,11 +24,11 @@ function safeBasename(name: string) {
   return name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').replace(/^[. ]+|[. ]+$/g, '').slice(0, 65) || 'stickerwave';
 }
 
-export function ExportDialog({ project, assets, frame, initialFocus = 'all', close }: Props) {
+export function ExportDialog({ project, assets, frame, initialFocus = 'all', onOpenSendModal, close }: Props) {
   const { copy } = useApp();
   const layers = visualLayers(project).filter(layer => !project.hidden.includes(layer.id));
   const visual = layers.length > 0;
-  const sound = audioTracks(project).length > 0;
+  const sound = audioTracks(project).some(track => !track.style.muted);
   const animated = layers.some(layer => {
     const asset = layer.kind === 'media' && assets.get(layer.asset);
     return Boolean(asset && layer.kind === 'media' && motion(asset, layer.style));
@@ -47,11 +48,23 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', clo
   const [copiedPng, setCopiedPng] = useState(false);
   const [result, setResult] = useState<(ExportResult & { url: string; file: File; exportedFormat: ExportFormat })>();
   const [kit, setKit] = useState<KitResult>();
+  const [bridgeResult, setBridgeResult] = useState<{
+    response: AddToWhatsAppResponse;
+    webpUrl: string;
+    webpFile: File;
+    oggUrl?: string;
+    oggFile?: File;
+  }>();
+  const [thumbPreviewUrl, setThumbPreviewUrl] = useState<string | null>(null);
+  const [previewAudioUrl, setPreviewAudioUrl] = useState<string | null>(null);
+  const [playingPreviewAudio, setPlayingPreviewAudio] = useState(false);
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
   const [container, setContainer] = useState(mp4Preferred);
   const [cloudCaps, setCloudCaps] = useState<GatewayCapabilitiesResponse | null>(null);
   const [showAllFormats, setShowAllFormats] = useState(initialFocus !== 'whatsapp' || !whatsappTarget);
   const operation = useRef<AbortController | null>(null);
   const objectUrls = useRef<string[]>([]);
+  const previewUrlsRef = useRef<string[]>([]);
   const mounted = useRef(true);
 
   function clearUrls() {
@@ -61,15 +74,40 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', clo
 
   useEffect(() => {
     mounted.current = true;
+    const previewCtrl = new AbortController();
     void probeCloudGateway().then((probe) => {
       if (mounted.current && probe?.capabilities.cloudMediaEnabled) {
         setCloudCaps(probe.capabilities);
       }
     });
+    if (initialFocus === 'whatsapp' && visual) {
+      void imagePngExport(project, assets, previewCtrl.signal, frame)
+        .then((pngBlob) => {
+          if (!mounted.current) return;
+          const url = URL.createObjectURL(pngBlob);
+          previewUrlsRef.current.push(url);
+          setThumbPreviewUrl(url);
+        })
+        .catch(() => undefined);
+      if (sound) {
+        void renderProjectMediaForGateway(project, assets, previewCtrl.signal, { skipVisual: true })
+          .then((m) => {
+            if (!mounted.current || !m.audioBlob) return;
+            const url = URL.createObjectURL(m.audioBlob);
+            previewUrlsRef.current.push(url);
+            setPreviewAudioUrl(url);
+          })
+          .catch(() => undefined);
+      }
+    }
     return () => {
       mounted.current = false;
+      previewCtrl.abort();
+      audioElRef.current?.pause();
       operation.current?.abort(new Error('3002'));
       clearUrls();
+      previewUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+      previewUrlsRef.current = [];
     };
   }, []);
 
@@ -208,18 +246,116 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', clo
     }
   }
 
+  async function runAddToWhatsAppBridge() {
+    if (operation.current || !visual) return;
+    if (!cloudCaps?.cloudMediaEnabled) {
+      await start('wastickers', '');
+      return;
+    }
+    const task = new AbortController();
+    operation.current = task;
+    clearUrls();
+    setResult(undefined);
+    setKit(undefined);
+    setBridgeResult(undefined);
+    setFailure(undefined);
+    setProgress(0.15);
+    try {
+      const media = await renderProjectMediaForGateway(project, assets, task.signal, { frameMs: frame });
+      if (mounted.current) setProgress(0.55);
+      const res = await addStickerToWhatsAppViaGateway({
+        visualBlob: media.visualBlob,
+        visualName: media.visualName,
+        audioBlob: media.audioBlob,
+        audioName: media.audioName,
+        packName: project.name,
+        shapeOptions: {
+          shape: project.stickerShape ?? 'square',
+          borderWhite: Boolean(project.stickerBorder),
+          background: project.background ?? null,
+        },
+        signal: task.signal,
+      });
+      task.signal.throwIfAborted();
+      const basename = safeBasename(project.name);
+      const webpB64 = res.encodedSticker?.webpBase64;
+      if (!webpB64) throw new Error('3004');
+      const webpBytes = Uint8Array.from(atob(webpB64), (c) => c.charCodeAt(0));
+      const webpBlob = new Blob([webpBytes], { type: 'image/webp' });
+      const webpUrl = URL.createObjectURL(webpBlob);
+      objectUrls.current.push(webpUrl);
+      const webpFile = new File([webpBlob], `${basename}.webp`, { type: 'image/webp' });
+
+      let oggUrl: string | undefined;
+      let oggFile: File | undefined;
+      if (res.encodedSticker?.oggBase64) {
+        const oggBytes = Uint8Array.from(atob(res.encodedSticker.oggBase64), (c) => c.charCodeAt(0));
+        const oggBlob = new Blob([oggBytes], { type: 'audio/ogg' });
+        oggUrl = URL.createObjectURL(oggBlob);
+        objectUrls.current.push(oggUrl);
+        oggFile = new File([oggBlob], `${basename}.ogg`, { type: 'audio/ogg' });
+      }
+      if (mounted.current) {
+        setBridgeResult({ response: res, webpUrl, webpFile, oggUrl, oggFile });
+      }
+    } catch (error) {
+      if (mounted.current) setFailure(task.signal.aborted ? '3002' : errorCode(error, '3004'));
+    } finally {
+      operation.current = null;
+      if (mounted.current) setProgress(undefined);
+    }
+  }
+
+  function toggleBridgeAudio() {
+    if (!previewAudioUrl) return;
+    if (playingPreviewAudio && audioElRef.current) {
+      audioElRef.current.pause();
+      audioElRef.current.currentTime = 0;
+      setPlayingPreviewAudio(false);
+      return;
+    }
+    const audio = audioElRef.current ?? new Audio(previewAudioUrl);
+    audio.src = previewAudioUrl;
+    audio.onended = () => setPlayingPreviewAudio(false);
+    audioElRef.current = audio;
+    void audio.play().then(() => setPlayingPreviewAudio(true)).catch(() => setPlayingPreviewAudio(false));
+  }
+
   const shareable = result && navigator.canShare?.({ files: [result.file] });
   const kitShareable = kit && navigator.canShare?.({ files: [kit.imageFile, kit.audioFile] });
+  const bridgeShareable = bridgeResult && navigator.canShare?.({ files: [bridgeResult.webpFile] });
   const canClipboardImage = typeof ClipboardItem !== 'undefined' && Boolean(navigator.clipboard?.write) && visual;
   const isWhatsappMedia = result && ['video', 'webp', 'animated-webp', 'whatsapp-image', 'wastickers'].includes(result.exportedFormat);
   const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-  const hasOutput = Boolean(result || kit);
+  const hasOutput = Boolean(result || kit || bridgeResult);
+  const stickerTypeLabel = sound
+    ? copy.stickerTypeSound
+    : animated
+      ? copy.stickerTypeAnimated
+      : copy.stickerTypeStatic;
 
   return <Modal title={copy.exportTitle} className="export-modal" close={() => operation.current ? operation.current.abort(new Error('3002')) : close()}>
     {!hasOutput && cloudCaps?.cloudMediaEnabled && <span className="wa-cloud-pill">
       <Cloud size={14} />
       {copy.waCloudBadge}
     </span>}
+
+    {!hasOutput && initialFocus === 'whatsapp' && whatsappTarget && <div className="wa-conclusion-card">
+      <div className="wa-conclusion-top">
+        {thumbPreviewUrl && <img className="wa-conclusion-thumb" src={thumbPreviewUrl} width={72} height={72} alt={copy.preview} />}
+        <div className="wa-conclusion-meta">
+          <div className="wa-conclusion-badges">
+            <span className="wa-type-pill"><Volume2 size={13} />{stickerTypeLabel}</span>
+            <span className="wa-compat-badge">{(totalDuration / 1000).toFixed(1)} s</span>
+            <span className="wa-compat-badge"><Check size={13} />{copy.stickerCompatReady}</span>
+          </div>
+          {previewAudioUrl && <button type="button" className="button button-outline button-small" onClick={toggleBridgeAudio}>
+            {playingPreviewAudio ? <Square size={13} /> : <Play size={13} />}
+            {playingPreviewAudio ? copy.waSendStopAudio : copy.waSendPlayAudio}
+          </button>}
+        </div>
+      </div>
+    </div>}
 
     {!hasOutput && whatsappTarget && <div className="whatsapp-direct-box">
       <div className="whatsapp-direct-copy">
@@ -228,12 +364,20 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', clo
       </div>
       <div className="whatsapp-direct-actions">
         <button type="button" className="button button-green" disabled={progress !== undefined}
-          onClick={() => void start(whatsappTarget, whatsappTarget === 'video' ? mp4Preferred : '')}>
-          <MessageCircle size={17} />{sound || animated ? copy.whatsappDirectAction : copy.whatsappWastickersAction}
+          onClick={() => void runAddToWhatsAppBridge()}>
+          <MessageCircle size={17} />{copy.addToWhatsAppAction}
         </button>
+        {onOpenSendModal && <button type="button" className="button button-outline" disabled={progress !== undefined}
+          onClick={onOpenSendModal}>
+          <ExternalLink size={16} />{copy.sendThroughWhatsAppAction}
+        </button>}
         <button type="button" className="button button-outline" disabled={progress !== undefined}
           onClick={() => void start('wastickers', '')}>
           <Package size={16} />{copy.whatsappWastickersAction}
+        </button>
+        <button type="button" className="button button-outline" disabled={progress !== undefined}
+          onClick={() => void start(whatsappTarget, whatsappTarget === 'video' ? mp4Preferred : '')}>
+          <Film size={16} />{sound || animated ? copy.whatsappDirectAction : copy.whatsappWastickersAction}
         </button>
         {sound && <button type="button" className="button button-outline" disabled={progress !== undefined}
           onClick={() => void buildWhatsappKit()}>
@@ -264,6 +408,38 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', clo
     </div><p className="inspector-note">{copy.native}</p></>}
     {failure && <Notice error={failure !== '3002'}>{copy.errors[failure]} [SW-{failure}]</Notice>}
     {progress !== undefined && <div className="progress-area" role="status"><p>{copy.exporting}</p><progress value={progress || undefined} max={1} /></div>}
+
+    {bridgeResult && <div className="export-result" role="status">
+      <h3>{bridgeResult.response.headline}</h3>
+      <p>{bridgeResult.response.explanation}</p>
+      <img src={bridgeResult.webpUrl} width="128" height="128" alt={copy.preview} />
+      {bridgeResult.response.encodedSticker && <p className="inspector-note">
+        WebP {(bridgeResult.response.encodedSticker.webpBytes / 1024).toFixed(1)} KB
+        {bridgeResult.response.encodedSticker.oggBytes > 0 ? ` · Ogg/Opus ${(bridgeResult.response.encodedSticker.oggBytes / 1024).toFixed(1)} KB` : ''}
+      </p>}
+      <div className="button-row">
+        {onOpenSendModal && <button type="button" className="button button-green" onClick={onOpenSendModal}>
+          <MessageCircle size={17} />{copy.sendThroughWhatsAppAction}
+        </button>}
+        {bridgeShareable && <button type="button" className="button button-green" onClick={() => void shareFiles([bridgeResult.webpFile])}>
+          <Share2 size={17} />{copy.whatsappSendDirect}
+        </button>}
+        <a className="button button-outline" href={bridgeResult.webpUrl} download={bridgeResult.webpFile.name}><Download size={17} />{copy.downloadWebpExifAction}</a>
+        {bridgeResult.oggUrl && bridgeResult.oggFile && <a className="button button-outline" href={bridgeResult.oggUrl} download={bridgeResult.oggFile.name}><Download size={17} />Ogg/Opus</a>}
+      </div>
+      <details className="wa-secondary-exports">
+        <summary>{copy.waBridgeSecondaryFormats}</summary>
+        <div className="button-row" style={{ marginTop: 8 }}>
+          <button type="button" className="button button-outline button-small" onClick={() => { setBridgeResult(undefined); void start(whatsappTarget ?? 'webp', whatsappTarget === 'video' ? mp4Preferred : ''); }}>
+            <Film size={15} />{copy.whatsappDirectAction}
+          </button>
+          <button type="button" className="button button-outline button-small" onClick={() => { setBridgeResult(undefined); void start('wastickers', ''); }}>
+            <Package size={15} />{copy.whatsappWastickersAction}
+          </button>
+        </div>
+      </details>
+      <button className="text-button" onClick={() => setBridgeResult(undefined)}>{copy.format}</button>
+    </div>}
 
     {kit && <div className="export-result" role="status">
       <h3>{copy.whatsappKitTitle}</h3>

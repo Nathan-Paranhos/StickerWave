@@ -653,3 +653,26 @@ progress { height: 13px; width: 100%; accent-color: #6a923b; }
 [data-theme="dark"] .wa-badge-warn { background: #463712; color: #f7df99; }
 [data-theme="dark"] .wa-badge-err { background: #4f2124; color: #ffbabd; }
 
+.footer-credit { margin-top: 8px; font-size: .86rem; font-weight: 650; color: #3d4d3a; }
+.credit-link { color: #2b5016; font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
+.credit-link:hover { color: #19310b; }
+[data-theme="dark"] .footer-credit { color: #b8c9b2; }
+[data-theme="dark"] .credit-link { color: #b9e867; }
+[data-theme="dark"] .credit-link:hover { color: #d8ff8d; }
+
+.wa-conclusion-card { display: grid; gap: 12px; padding: 14px 16px; border-radius: 14px; background: #fbfcfa; border: 1px solid #d4dec9; margin-bottom: 12px; }
+.wa-conclusion-top { display: flex; align-items: center; gap: 12px; }
+.wa-conclusion-thumb { width: 72px; height: 72px; border-radius: 12px; object-fit: contain; background: repeating-conic-gradient(#e4e9df 0% 25%, #fafbf9 0% 50%) 0 / 12px 12px; border: 1px solid #d7e0ce; flex: 0 0 auto; }
+.wa-conclusion-meta { display: grid; gap: 6px; min-width: 0; }
+.wa-conclusion-badges { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.wa-type-pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; background: #e3f4ca; color: #203d0f; font-size: .78rem; font-weight: 800; }
+.wa-compat-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; background: #eef3e8; color: #2d4526; font-size: .78rem; font-weight: 700; }
+.wa-secondary-exports { margin-top: 4px; width: 100%; border-top: 1px solid #e1e8d9; padding-top: 10px; }
+.wa-secondary-exports summary { cursor: pointer; font-size: .86rem; font-weight: 750; color: #2e4225; }
+[data-theme="dark"] .wa-conclusion-card { background: #1e251d; border-color: #3a4938; }
+[data-theme="dark"] .wa-conclusion-thumb { background: repeating-conic-gradient(#242b23 0% 25%, #192019 0% 50%) 0 / 12px 12px; border-color: #3d4d3b; }
+[data-theme="dark"] .wa-type-pill { background: #2d4c1c; color: #dcf6ab; }
+[data-theme="dark"] .wa-compat-badge { background: #263323; color: #cee0c8; }
+[data-theme="dark"] .wa-secondary-exports { border-color: #384636; }
+[data-theme="dark"] .wa-secondary-exports summary { color: #d5e6cd; }
+

@@ -391,7 +391,7 @@ README, SDD, AGENTS, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, LICENSE, THIRD_PAR
 
 ## 17. Architecture Decision Records
 
-ADR-001 local-first; 002 React TS; 003 monólito modular e extração tardia; 004 Netlify estático; 005 IndexedDB; 006 workers e fila 1; 007 native-first e conversores lazy; 008 Wavi progressivo; 009 catálogo estático; 010 MIT/CC0/CC BY; 011 registry/adapters; 012 WhatsApp isolado/gates; 013 sem cadastro/backend; 014 sem IA obrigatória; 015 fallback; 016 importadores extensíveis; 017 orçamento de dependências; 018 PWA adiada. Registros em `adr/DECISIONS.md`, todos propostos, revisar após spikes. Cada ADR guarda contexto, alternativas, decisão, consequência e gatilho de revisão.
+ADR-001 local-first; 002 React TS; 003 monólito modular e extração tardia; 004 Netlify estático; 005 IndexedDB; 006 workers e fila 1; 007 native-first e conversores lazy; 008 Wavi progressivo; 009 catálogo estático; 010 MIT/CC0/CC BY; 011 registry/adapters; 012 WhatsApp isolado/gates; 013 sem cadastro/backend; 014 sem IA obrigatória; 015 fallback; 016 importadores extensíveis; 017 orçamento de dependências; 018 PWA adiada; 019 Gateway WhatsApp isolado; 020 Protocolo dual envelope-134/campo-26, EXIF 0x5741 e bridge. Registros em `adr/` e `docs/adr/`, todos documentados com contexto, decisão e gatilho de revisão.
 
 ## 18. Roadmap por entregas, não por quantidade de bibliotecas
 

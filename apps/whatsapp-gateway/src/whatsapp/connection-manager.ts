@@ -30,7 +30,11 @@ export interface MinimalWASocket {
   ev: BaileysEventEmitter;
   user?: { id?: string; lid?: string; name?: string } | undefined;
   waUploadToServer: Parameters<typeof SoundStickerProtocol.prototype.sendSoundSticker>[0]['upload'];
-  relayMessage: (jid: string, message: proto.IMessage, options: { messageId: string }) => Promise<string>;
+  relayMessage: (
+    jid: string,
+    message: proto.IMessage,
+    options: { messageId: string; additionalAttributes?: Record<string, string> },
+  ) => Promise<string>;
   sendMessage?: (jid: string, content: { text: string }) => Promise<unknown>;
   onWhatsApp: (...phones: string[]) => Promise<Array<{ jid: string; exists: boolean }> | undefined>;
   logout: (msg?: string) => Promise<void>;
@@ -421,12 +425,24 @@ export class WhatsAppConnectionManager {
     const senderJid = msg.key?.remoteJid;
     if (!senderJid) return;
 
-    if (this.config.debugProtocol && msg.message?.stickerMessage) {
+    if (this.config.debugProtocol && msg.message) {
       try {
-        const rawBytes = waProto.Message.StickerMessage.encode(msg.message.stickerMessage).finish();
-        const audioMeta = inspectRawStickerAudio(rawBytes);
-        if (audioMeta) {
-          this.logger.debug('Incoming sound sticker observed.', { from: maskJid(senderJid), seconds: audioMeta.decodedAudio.seconds });
+        const envelopeSticker = (
+          msg.message as unknown as {
+            audioStickerMessage?: { message?: { stickerMessage?: proto.Message.IStickerMessage } };
+          }
+        ).audioStickerMessage?.message?.stickerMessage;
+        const targetSticker = envelopeSticker ?? msg.message.stickerMessage;
+        if (targetSticker) {
+          const rawBytes = waProto.Message.StickerMessage.encode(targetSticker).finish();
+          const audioMeta = inspectRawStickerAudio(rawBytes, envelopeSticker ? 'envelope-134' : 'sticker-26');
+          if (audioMeta) {
+            this.logger.debug('Incoming sound sticker observed.', {
+              from: maskJid(senderJid),
+              strategy: audioMeta.strategy,
+              seconds: audioMeta.decodedAudio.seconds,
+            });
+          }
         }
       } catch {
         // Never crash on incoming debug parse

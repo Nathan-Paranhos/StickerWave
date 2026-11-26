@@ -41,6 +41,24 @@ paths:
       responses:
         '200':
           description: Capacidades do gateway
+  /api/v1/media/convert:
+    post:
+      summary: Processamento Cloud FFmpeg (WebP 512x512 + EXIF, Ogg/Opus, MP4 com som ou .wastickers)
+      responses:
+        '200':
+          description: Binário da mídia gerada
+  /api/stickers/process:
+    post:
+      summary: Processa composição no StickerWave Core retornando WebP+EXIF 0x5741, Ogg/Opus e relatório de validação
+      responses:
+        '200':
+          description: EncodedSoundSticker validado
+  /api/stickers/add-to-whatsapp:
+    post:
+      summary: Resolve estratégia de adição/envio ao WhatsApp por plataforma (Web, PWA, Android, iOS)
+      responses:
+        '200':
+          description: Resposta da StickerImportBridge com artefatos e eventual job enfileirado
   /api/v1/admin/whatsapp/auth/verify:
     post:
       security:

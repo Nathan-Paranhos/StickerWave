@@ -26,6 +26,8 @@ export interface EnqueueStickerJobInput {
   shapeOptions?: Partial<StickerShapeOptions>;
   audioOptions?: StickerAudioOptions;
   accessibilityLabel?: string;
+  emojis?: string[];
+  packName?: string;
 }
 
 export class JobDomainError extends Error {
@@ -250,6 +252,11 @@ export class StickerJobService {
         audioOriginalName: exec.input.audioName,
         shapeOptions: exec.input.shapeOptions,
         audioOptions: exec.input.audioOptions,
+        metadata: {
+          packName: exec.input.packName || 'StickerWave',
+          packPublisher: 'Nathan Paranhos',
+          emojis: exec.input.emojis?.length ? exec.input.emojis : ['🔊'],
+        },
         signal: exec.abortController.signal,
         onStage: (stage, progress, stageLabel) => {
           if (!exec.abortController.signal.aborted) {
@@ -284,6 +291,7 @@ export class StickerJobService {
           isAnimated: processed.isAnimated,
           seconds: processed.secondsField,
           waveform: processed.waveform,
+          emojis: exec.input.emojis,
           accessibilityLabel: exec.input.accessibilityLabel,
         },
       });

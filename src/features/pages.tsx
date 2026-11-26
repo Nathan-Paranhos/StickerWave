@@ -44,7 +44,21 @@ export function Footer() {
   const { copy } = useApp();
   return <footer className="site-footer">
     <div className="wrap footer-inner">
-      <div><Brand /><p>{copy.footer}</p><div className="button-row footer-preferences"><ThemeControl /></div></div>
+      <div>
+        <Brand />
+        <p>{copy.footer}</p>
+        <p className="footer-credit">
+          {copy.developedBy}{' '}
+          <a className="credit-link" href="https://nathan-paranhos.com.br/" target="_blank" rel="noopener noreferrer">
+            Nathan Paranhos
+          </a>
+          {' · '}
+          <a className="credit-link" href="https://nathan-paranhos.com.br/" target="_blank" rel="noopener noreferrer">
+            https://nathan-paranhos.com.br/
+          </a>
+        </p>
+        <div className="button-row footer-preferences"><ThemeControl /></div>
+      </div>
       <nav aria-label={copy.about}>
         {(['docs', 'privacy', 'licenses', 'contribute', 'about'] as const).map(item => <Link key={item} href={`/${item}`}>{copy[item]}</Link>)}
       </nav>
@@ -62,7 +76,17 @@ export function Landing() {
         <h1>{copy.heroTitle}<br /><span>{copy.heroSecond}</span></h1>
         <p className="hero-description">{copy.heroBody}</p>
         <Link className="button button-green hero-cta" href="/studio"><Sparkles size={21} />{copy.create}</Link>
-        <div className="hero-details"><span><ShieldCheck size={17} />{copy.local}</span><span><ScanLine size={17} />{copy.free}</span></div>
+        <div className="hero-details">
+          <span><ShieldCheck size={17} />{copy.local}</span>
+          <span><ScanLine size={17} />{copy.free}</span>
+          <span>
+            <Code2 size={17} />
+            {copy.developedBy}{' '}
+            <a className="credit-link" href="https://nathan-paranhos.com.br/" target="_blank" rel="noopener noreferrer">
+              Nathan Paranhos
+            </a>
+          </span>
+        </div>
       </div>
       <Wavi state={meter.active ? 'Dance' : 'Idle'} level={meter.level} bass={meter.bass} />
     </section>
@@ -236,6 +260,15 @@ export function Editorial({ topic }: { topic: EditorialPage }) {
   return <section className="wrap page editorial">
     <p className="eyebrow"><Icon size={18} />StickerWave</p><h1>{copy[topic]}</h1>
     {editorial[locale][topic].map(([title, text]) => <article key={title}><h2>{title}</h2><p>{text}</p></article>)}
+    {topic === 'about' && <article>
+      <h2>{copy.developedBy}</h2>
+      <p>
+        <strong>Nathan Paranhos</strong> —{' '}
+        <a className="credit-link" href="https://nathan-paranhos.com.br/" target="_blank" rel="noopener noreferrer">
+          https://nathan-paranhos.com.br/
+        </a>
+      </p>
+    </article>}
     {info && <article><h2>{copy.diagnosticsTitle}</h2>
       <dl className="capabilities">{Object.entries(info).map(([name, available]) => <div key={name}><dt>{name}</dt><dd>{available ? copy.supported : copy.unavailable}</dd></div>)}</dl>
       <button className="button button-outline" onClick={() => void navigator.clipboard.writeText(JSON.stringify({ version: '2.1.0-beta.1', capabilities: info }, null, 2))

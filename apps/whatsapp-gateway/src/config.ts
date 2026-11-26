@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { SoundStickerProtocolStrategy } from '@stickerwave/contracts';
 
 export interface GatewayConfig {
   nodeEnv: string;
@@ -8,6 +9,7 @@ export interface GatewayConfig {
   publicBaseUrl: string;
   allowedOrigins: string[];
   enableSoundStickers: boolean;
+  soundStickerProtocol: SoundStickerProtocolStrategy;
   enableWaBot: boolean;
   adminSecret: string;
   publicToken: string;
@@ -97,6 +99,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
       .map((origin) => origin.trim())
       .filter(Boolean),
     enableSoundStickers: parseFlag(env.ENABLE_SOUND_STICKERS, true),
+    soundStickerProtocol:
+      String(env.SOUND_STICKER_PROTOCOL || '').trim().toLowerCase() === 'sticker-26'
+        ? 'sticker-26'
+        : 'envelope-134',
     enableWaBot: parseFlag(env.ENABLE_WA_BOT, false),
     adminSecret: env.GATEWAY_ADMIN_SECRET || 'dev-admin-secret-change-in-prod',
     publicToken: (env.GATEWAY_PUBLIC_TOKEN || '').trim(),

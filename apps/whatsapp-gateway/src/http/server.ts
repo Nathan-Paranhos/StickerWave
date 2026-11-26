@@ -3,10 +3,12 @@ import {
   CLOUD_MEDIA_FORMATS,
   GATEWAY_ERROR_CODES,
   STICKER_LIMITS_PROFILE,
+  type ClientPlatformTarget,
   type CloudMediaFormat,
   type GatewayCapabilitiesResponse,
   type GatewayHealthResponse,
   type GatewayReadyResponse,
+  type SoundStickerProtocolStrategy,
   type StickerAudioOptions,
   type StickerShapeOptions,
 } from '@stickerwave/contracts';
@@ -20,6 +22,7 @@ import { JobDomainError, StickerJobService } from '../services/sticker-job-servi
 import { GatewayDatabase } from '../storage/database.js';
 import { EncryptedSessionStore } from '../whatsapp/session-store.js';
 import { SoundStickerProtocol } from '../whatsapp/sound-sticker-protocol.js';
+import { StickerImportBridge } from '../whatsapp/sticker-import-bridge.js';
 import { WhatsAppConnectionManager, type WASocketFactory } from '../whatsapp/connection-manager.js';
 import { buildOpenApiDocument } from './openapi.js';
 import {
@@ -103,6 +106,40 @@ async function readJsonBody<T>(req: IncomingMessage, maxBytes = 64 * 1024): Prom
   return JSON.parse(raw.toString('utf8')) as T;
 }
 
+function normalizeApiPath(rawPathname: string): string {
+  if (rawPathname.startsWith('/api/v1/')) return rawPathname;
+  if (rawPathname.startsWith('/api/')) return `/api/v1/${rawPathname.slice('/api/'.length)}`;
+  return rawPathname;
+}
+
+async function parseStickerMultipartRequest(req: IncomingMessage, config: GatewayConfig) {
+  const contentType = String(req.headers['content-type'] || '');
+  if (!contentType.toLowerCase().includes('multipart/form-data')) {
+    throw new JobDomainError(415, GATEWAY_ERROR_CODES.INVALID_MEDIA, 'Envie a composição via multipart/form-data.');
+  }
+
+  const maxMultipartBytes = config.maxVisualUploadBytes + config.maxAudioUploadBytes + 512 * 1024;
+  const rawBody = await readRawBody(req, maxMultipartBytes);
+  const { fields, files } = parseMultipartBody(rawBody, contentType);
+
+  if (fields.visualUrl || fields.audioUrl) {
+    throw new JobDomainError(
+      400,
+      GATEWAY_ERROR_CODES.INVALID_MEDIA,
+      'URLs externas não são aceitas diretamente pelo servidor; envie os bytes da mídia.',
+    );
+  }
+
+  const shapeOptions = fields.shapeOptions
+    ? (shapeOptionsSchema.parse(JSON.parse(fields.shapeOptions)) as Partial<StickerShapeOptions>)
+    : undefined;
+  const audioOptions = fields.audioOptions
+    ? (audioOptionsSchema.parse(JSON.parse(fields.audioOptions)) as StickerAudioOptions)
+    : undefined;
+
+  return { fields, files, shapeOptions, audioOptions };
+}
+
 function writeSseEvent(res: ServerResponse, eventName: string, data: unknown): void {
   res.write(`event: ${eventName}\n`);
   res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -127,11 +164,12 @@ export function createGatewayRuntime(
   }
 
   const ffmpeg = deps.ffmpegAdapter ?? new FFmpegAdapter({ ffmpegPath: config.ffmpegPath, ffprobePath: config.ffprobePath });
-  const protocol = new SoundStickerProtocol('7.0.0-rc14');
+  const protocol = new SoundStickerProtocol('7.0.0-rc14', config.soundStickerProtocol);
   const sessionStore = new EncryptedSessionStore(config.sessionDir, config.sessionSecret);
   const wa = new WhatsAppConnectionManager(config, sessionStore, protocol, logger, deps.socketFactory);
   const authService = new AuthorizationService(db, config, logger, () => wa.getBotPhoneDigits());
   const pipeline = new CompositionPipeline(ffmpeg, config);
+  const importBridge = new StickerImportBridge();
   const jobService = new StickerJobService(config, db, pipeline, wa, authService, logger);
 
   // Wire central bot incoming WhatsApp text -> opt-in verification listener
@@ -147,7 +185,7 @@ export function createGatewayRuntime(
   const server = http.createServer(async (req, res) => {
     const cors = applySecurityAndCorsHeaders(req, res, config);
     const reqUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-    const pathname = reqUrl.pathname;
+    const pathname = normalizeApiPath(reqUrl.pathname);
     const method = (req.method || 'GET').toUpperCase();
 
     if (cors.origin && !cors.originAllowed) {
@@ -222,9 +260,15 @@ export function createGatewayRuntime(
         },
         baileysVersion: protocol.capability.baileysVersion,
         protocolField26Supported: protocol.capability.mode !== 'unsupported',
+        protocolStrategy: protocol.capability.strategy,
+        supportedProtocolStrategies: protocol.capability.supportedStrategies,
         protocolMode: protocol.capability.mode,
         limits: STICKER_LIMITS_PROFILE,
         maxParallelJobs: config.maxParallelJobs,
+        authorCredit: {
+          name: 'Nathan Paranhos',
+          url: 'https://nathan-paranhos.com.br/',
+        },
       };
       sendJson(res, 200, body);
       return;
@@ -474,6 +518,140 @@ export function createGatewayRuntime(
       }
       const revoked = authService.revoke(validation.e164);
       sendJson(res, 200, { ok: true, revoked, masked: validation.masked });
+      return;
+    }
+
+    // --- StickerWave Core Process Endpoint (static / animated / sound -> validated WebP+EXIF+Ogg) ---
+    if (method === 'POST' && pathname === '/api/v1/stickers/process') {
+      try {
+        const { fields, files, shapeOptions, audioOptions } = await parseStickerMultipartRequest(req, config);
+        const visualPart = files.visual;
+        if (!visualPart || visualPart.data.byteLength === 0) {
+          sendError(res, 400, GATEWAY_ERROR_CODES.INVALID_MEDIA, 'Arquivo visual obrigatório ausente (campo "visual").');
+          return;
+        }
+        const protocolStrategy: SoundStickerProtocolStrategy =
+          fields.protocolStrategy === 'sticker-26' ? 'sticker-26' : config.soundStickerProtocol;
+        const emojis = fields.emojis
+          ? fields.emojis
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : undefined;
+        const result = await pipeline.processInternalSticker({
+          visualBytes: visualPart.data,
+          visualOriginalName: visualPart.filename,
+          audioBytes: files.audio?.data ?? null,
+          audioOriginalName: files.audio?.filename,
+          shapeOptions,
+          audioOptions,
+          protocolStrategy,
+          metadata: {
+            packName: fields.packName || fields.title || 'StickerWave',
+            packPublisher: fields.packPublisher || 'Nathan Paranhos',
+            emojis,
+          },
+        });
+        sendJson(res, 200, { ok: true, sticker: result.encodedSticker });
+      } catch (err) {
+        if (err instanceof JobDomainError) {
+          sendError(res, err.statusCode, err.code, err.message, err.retryable);
+          return;
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.startsWith('PAYLOAD_TOO_LARGE')) {
+          sendError(res, 413, GATEWAY_ERROR_CODES.MEDIA_TOO_LARGE, 'Payload de mídia excedeu o limite máximo permitido.');
+          return;
+        }
+        sendError(res, 400, GATEWAY_ERROR_CODES.INVALID_COMPOSITION, `Falha ao processar figurinha: ${msg}`);
+      }
+      return;
+    }
+
+    // --- Sticker Import Bridge Endpoint (Add to WhatsApp evaluation + optional authorized relay) ---
+    if (method === 'POST' && pathname === '/api/v1/stickers/add-to-whatsapp') {
+      try {
+        const { fields, files, shapeOptions, audioOptions } = await parseStickerMultipartRequest(req, config);
+        const visualPart = files.visual;
+        if (!visualPart || visualPart.data.byteLength === 0) {
+          sendError(res, 400, GATEWAY_ERROR_CODES.INVALID_MEDIA, 'Arquivo visual obrigatório ausente (campo "visual").');
+          return;
+        }
+        const platformRaw = String(fields.platform || 'web').toLowerCase();
+        const platform: ClientPlatformTarget =
+          platformRaw === 'android' || platformRaw === 'ios' || platformRaw === 'pwa' ? platformRaw : 'web';
+        const protocolStrategy: SoundStickerProtocolStrategy =
+          fields.protocolStrategy === 'sticker-26' ? 'sticker-26' : config.soundStickerProtocol;
+        const emojis = fields.emojis
+          ? fields.emojis
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : undefined;
+        const metadata = {
+          packName: fields.packName || fields.title || 'StickerWave',
+          packPublisher: fields.packPublisher || 'Nathan Paranhos',
+          emojis,
+        };
+
+        const processed = await pipeline.processInternalSticker({
+          visualBytes: visualPart.data,
+          visualOriginalName: visualPart.filename,
+          audioBytes: files.audio?.data ?? null,
+          audioOriginalName: files.audio?.filename,
+          shapeOptions,
+          audioOptions,
+          protocolStrategy,
+          metadata,
+        });
+
+        const waSnap = wa.getSnapshot();
+        const waConnected = config.enableWaBot && waSnap.status === 'CONNECTED';
+        let dispatchedJob = null;
+
+        const recipientPhone = (fields.recipientPhone || '').trim();
+        if (recipientPhone && waConnected && processed.oggBuffer) {
+          const phoneValidation = authService.validatePhone(recipientPhone);
+          if (phoneValidation.valid && phoneValidation.e164 && authService.isAuthorized(phoneValidation.e164)) {
+            const enqueued = jobService.enqueue({
+              idempotencyKey: fields.idempotencyKey?.trim() || undefined,
+              recipientPhone,
+              visualBytes: visualPart.data,
+              visualName: visualPart.filename,
+              audioBytes: files.audio?.data ?? null,
+              audioName: files.audio?.filename,
+              shapeOptions,
+              audioOptions,
+              emojis,
+              packName: metadata.packName,
+              accessibilityLabel: fields.accessibilityLabel?.slice(0, 250),
+            });
+            dispatchedJob = enqueued.job;
+          }
+        }
+
+        const bridgeResult = importBridge.resolveAddToWhatsApp({
+          platform,
+          encodedSticker: processed.encodedSticker,
+          metadata,
+          waConnected,
+          waBotEnabled: config.enableWaBot,
+          botPhoneHint: wa.getBotPhoneDigits() || config.waBotPhoneHint,
+          dispatchedJob,
+        });
+        sendJson(res, 200, bridgeResult);
+      } catch (err) {
+        if (err instanceof JobDomainError) {
+          sendError(res, err.statusCode, err.code, err.message, err.retryable);
+          return;
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.startsWith('PAYLOAD_TOO_LARGE')) {
+          sendError(res, 413, GATEWAY_ERROR_CODES.MEDIA_TOO_LARGE, 'Payload de mídia excedeu o limite máximo permitido.');
+          return;
+        }
+        sendError(res, 400, GATEWAY_ERROR_CODES.INVALID_COMPOSITION, `Erro na ponte de importação: ${msg}`);
+      }
       return;
     }
 

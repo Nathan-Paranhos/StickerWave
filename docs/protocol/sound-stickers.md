@@ -1,72 +1,56 @@
-# Protocolo de Figurinhas Sonoras — StickerWave WhatsApp Gateway
+# Protocolo de Figurinhas Sonoras — StickerWave Core & Gateway (v2)
 
-## 1. Descoberta técnica: por que WebP não embute MP3/Opus
+## 1. Descoberta técnica: por que WebP puro não transporta áudio
 
-O formato RIFF/WebP padrão suporta imagens estáticas (`VP8 `/`VP8L`), canal alfa (`ALPH`) e sequências animadas (`VP8X`/`ANIM`/`ANMF`). Ele **não possui container padronizado nem suporte no WhatsApp para faixas de áudio embutidas dentro do arquivo `.webp`**.
+O formato RIFF/WebP padrão suporta quadros estáticos (`VP8 `/`VP8L`), canal alfa (`ALPH`), animações (`VP8X`/`ANIM`/`ANMF`) e metadados `EXIF`/`XMP`. Ele **não possui stream de áudio decodificável nativamente pelo WhatsApp dentro do arquivo `.webp`**. Da mesma forma, envio sequencial (`StickerMessage` seguido de `AudioMessage`) não vincula o toque na figurinha à reprodução sonora.
 
-Da mesma forma, pacotes `.wastickers` locais e envios separados (`StickerMessage` seguido de `AudioMessage`) **não produzem uma figurinha sonora nativa** no chat do WhatsApp.
+## 2. Comparação técnica entre Estratégia A e Estratégia B
 
-## 2. Estrutura Protobuf validada
+A engenharia reversa comparou quatro fontes abertas: `7ucg/whatsapp-docs` (`WA_STICKERS.md`, WhatsApp Android `2.26.41.6`), `DavidRamirez206/whatsapp-sound-sticker-bot` (`src/sticker-audio-patch.js`, MIT), `alkhrzmy/wa-sound-sticker` (`src/wire.js` / `src/webp.js` / `src/sender.js`, MIT) e `@whiskeysockets/baileys@7.0.0-rc14`.
 
-Conforme documentação comunitária de engenharia reversa (`7ucg/whatsapp-docs` — `WA_STICKERS.md`, Android 2.26.41.6 `C30611DTf`) e implementação de referência (`DavidRamirez206/whatsapp-sound-sticker-bot`), uma figurinha sonora nativa no WhatsApp utiliza **duas mídias criptografadas e enviadas de forma independente aos servidores MMS do WhatsApp**, combinadas em **uma única mensagem Protobuf**:
-
-```protobuf
-message Message {
-  optional StickerMessage stickerMessage = 26;
-  // future wrapper observado em builds recentes: optional FutureProofMessage audioStickerMessage = 134 (sem uso direto)
-}
-
-message StickerMessage {
-  optional string url = 1;
-  optional bytes fileSha256 = 2;
-  optional bytes fileEncSha256 = 3;
-  optional bytes mediaKey = 4;
-  optional string mimetype = 5;         // "image/webp"
-  optional uint32 height = 6;           // 512
-  optional uint32 width = 7;            // 512
-  optional string directPath = 8;
-  optional uint64 fileLength = 9;
-  optional int64 mediaKeyTimestamp = 10;
-  optional uint32 firstFrameLength = 11;
-  optional bytes firstFrameSidecar = 12;
-  optional bool isAnimated = 13;
-  // ...
-  optional string accessibilityLabel = 22;
-  oneof audio {
-    Message.AudioMessage audioMessage = 26; // wire tag = (26 << 3) | 2 = 210
-  }
-}
-```
+| Aspecto | Estratégia A (`sticker-26`) | Estratégia B (`envelope-134`, padrão v2) |
+| --- | --- | --- |
+| Campo externo `Message` | `Message.stickerMessage` (campo `26`) | `Message.audioStickerMessage` (campo `134`, `FutureProofMessage`) |
+| Wrapper interno | Direto em `StickerMessage` | `FutureProofMessage.message (#1)` -> `Message.stickerMessage (#26)` |
+| Campos adicionais em `StickerMessage` | `#26 audioMessage` (`AudioMessage`) | `#24 premium` (`bool = false`), `#25 emojis` (`repeated string`), `#26 audioMessage` |
+| Metadado EXIF WebP `0x5741` | Opcional em bots simples | Recomendado com `"sound-sha256": base64(sha256(ogg))`, packId, publisher |
+| WebP de imagem estática + som | `isAnimated = false` (ou `true`) | Convertido para WebP animado de 1 quadro (`VP8X` + `ANIM` + `ANMF`) com `isAnimated = true` |
+| Flag `AudioMessage.ptt` | `true` em bots legados | `false` no envelope `#134` |
+| Evidência nas referências | Confirmada em `C30611DTf` (`WA_STICKERS.md`) | Documentada em `WA_STICKERS.md` (`2.26.41.6`) + validada em produção por `alkhrzmy/wa-sound-sticker` |
 
 ### Auditoria na versão instalada do Baileys (`@whiskeysockets/baileys@7.0.0-rc14`)
 
-Inspeção direta em `node_modules/@whiskeysockets/baileys/WAProto/index.js` e `WAProto/index.d.ts`:
-- `IStickerMessage` e `StickerMessage.encode` na versão `7.0.0-rc14` definem campos até `mediaKeyDomain` (`tag 184`).
-- O campo `26` (`audioMessage`, tag `210`) **não existe no código gerado padrão do `WAProto` dessa versão**.
-- Sem adaptação, `proto.Message.StickerMessage.encode` descarta silenciosamente qualquer propriedade `audioMessage`, fazendo a figurinha chegar muda no cliente WhatsApp.
+Inspeção direta em `apps/whatsapp-gateway/node_modules/@whiskeysockets/baileys/WAProto/index.d.ts`:
+- `proto.Message` não declara `audioStickerMessage` (`134`).
+- `proto.Message.StickerMessage` declara campos até `mediaKeyDomain`, omitindo `premium` (`24`), `emojis` (`25`) e `audioMessage` (`26`).
+- Sem adaptação em memória, `proto.Message.create` e `proto.Message.encode` descartam silenciosamente todos os campos acima.
 
-## 3. Adaptação isolada em `SoundStickerProtocol`
+## 3. Adaptação isolada em `SoundStickerProtocol` (zero edição em `node_modules`)
 
-O módulo `apps/whatsapp-gateway/src/whatsapp/sound-sticker-protocol.ts`:
-1. Nunca modifica arquivos dentro de `node_modules/`.
-2. Detecta dinamicamente se a versão instalada do Baileys já serializa o campo `26` nativamente (`detectNativeStickerAudioSupport`).
-3. Caso ausente, aplica um wrapper idempotente (`Symbol.for(...)`) em `proto.Message.StickerMessage.encode`.
-4. Associa o payload binário de `AudioMessage` usando chave composta `${base64(fileSha256)}:${base64(fileEncSha256)}` — garantindo **zero colisão em envios simultâneos**, mesmo quando dois usuários enviam o mesmo visual com áudios diferentes, porque `fileEncSha256` deriva de `mediaKey` aleatória gerada a cada upload.
-5. Serializa a mensagem completa (`proto.Message.encode`) e audita os bytes brutos **antes do `relayMessage`**, falhando caso o campo `26` esteja ausente.
+O módulo [sound-sticker-protocol.ts](../../apps/whatsapp-gateway/src/whatsapp/sound-sticker-protocol.ts):
+1. Detecta dinamicamente se `StickerMessage` (`#26`) ou `Message` (`#134`) possuem suporte nativo.
+2. Instala hooks idempotentes (`Symbol.for`) de **serialização e desserialização** (`StickerMessage.encode`/`decode` e `Message.create`/`encode`/`decode`) suportando ambas as estratégias (`SOUND_STICKER_PROTOCOL=envelope-134` padrão ou `sticker-26`).
+3. Preserva isolamento concorrente via chave composta `${base64(fileSha256)}:${base64(fileEncSha256)}`.
+4. Executa round-trip binário via [protobuf-wire.ts](../../apps/whatsapp-gateway/src/whatsapp/protobuf-wire.ts) antes de acionar `relayMessage`, bloqueando o envio se qualquer campo obrigatório estiver ausente.
+5. Envia atributo `{ mediatype: 'sticker' }` nas opções de `relayMessage`.
 
-## 4. Pipeline multimídia e limites (Oficial vs Experimental)
+## 4. Metadado EXIF `0x5741` e conversão estática -> 1 quadro animado
+
+Implementado em [webp-exif.ts](../../apps/whatsapp-gateway/src/media/webp-exif.ts):
+- Cabeçalho TIFF Big-Endian de 26 bytes com tag `0x5741` (`"WA"`, tipo `UNDEFINED`) e JSON UTF-8 contendo `sticker-pack-id`, `sticker-pack-name`, `sticker-pack-publisher` (`Nathan Paranhos`), `emojis` e `sound-sha256`.
+- Quando uma imagem estática é combinada com áudio no fluxo de figurinha sonora, o quadro (`ALPH` + `VP8 ` / `VP8L`) é encapsulado em `VP8X` (`flags` animado + EXIF + alfa) -> `ANIM` -> `ANMF` (duração alvo em ms) + chunk `EXIF`.
+
+## 5. Limites (Oficiais vs Experimentais)
 
 | Parâmetro | Limite oficial documentado (`WhatsApp/stickers`) | Perfil experimental StickerWave (Figurinhas Sonoras) |
 | --- | --- | --- |
-| Dimensões | 512 × 512 px exatos | 512 × 512 px RGBA |
-| Visual estático | WebP estático ≤ 100 KB (`<= 103.4 KB` no fetcher) | WebP estático alvo ≤ 100 KB (fallback ≤ 500 KB) |
-| Visual animado | WebP animado ≤ 500 KB, ≤ 10 s, frame ≥ 8 ms | WebP keyframes (`libwebp`, `-loop 0`) ≤ 500 KB |
-| Áudio | N/A em sticker packs de terceiros | Ogg/Opus 48 kHz mono, VBR (~32 kbps), ≤ 512 KB |
+| Dimensões | 512 × 512 px | 512 × 512 px RGBA |
+| WebP estático | ≤ 100 KB (`<= 103.4 KB` no fetcher) | ≤ 100 KB (estático puro); promovido para 1-frame `≤ 500 KB` com som |
+| WebP animado | ≤ 500 KB, ≤ 10 s, frame ≥ 8 ms | ≤ 500 KB (`-loop 0`) |
+| Áudio Ogg/Opus | Não suportado em packs de terceiros | Ogg/Opus 48 kHz mono (~32 kbps VBR), limite experimental ≤ 512 KB |
 | Waveform | N/A | 64 barras normalizadas `0..100` (`Uint8Array`) |
-| `AudioMessage` flags | Voice/audio pipeline (`WhatsApp Audio Keys`) | `mimetype="audio/ogg; codecs=opus"`, `ptt=true`, `seconds` inteiro ≥ 1 |
 
-## 5. Limitações conhecidas e riscos
+## 6. Riscos e fronteira real de dispositivos
 
-- Mudanças futuras no protocolo privado do WhatsApp ou na biblioteca Baileys podem alterar o campo `26` ou exigir migração para `audioStickerMessage` (`134`) caso seja padronizado e decodificado pela comunidade.
-- Clientes WhatsApp antigos (Android/iOS desatualizados ou versões antigas do WhatsApp Web/Desktop) podem exibir apenas a figurinha sem botão de som se não suportarem `StickerMessage.audioMessage`.
-- A conexão usa protocolo multidispositivo não oficial via WebSocket; políticas antispam e limites de envio do WhatsApp permanecem aplicáveis à conta conectada pelo administrador.
+- As APIs oficiais de pacote (`ENABLE_STICKER_PACK` no Android via `ContentProvider` e `UIPasteboard` no iOS) aceitam somente pacotes estáticos/animados (3 a 30 figurinhas WebP) e **não transportam trilha de áudio**.
+- Logo, a transmissão de uma figurinha sonora real para dentro do WhatsApp sem apps de terceiros depende do gateway/bot multidispositivo conectado via QR Code (`ENABLE_WA_BOT=true`). Nesta instância pública, `ENABLE_WA_BOT=false` por padrão para preservar os usuários finais.

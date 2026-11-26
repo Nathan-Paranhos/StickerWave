@@ -1,9 +1,14 @@
+import type { StickerMetadata } from '@stickerwave/contracts';
+import { extractWhatsAppExifMeta } from './webp-exif.js';
+
 export interface WebpInspection {
   valid: boolean;
   width: number | null;
   height: number | null;
   animated: boolean;
   hasAlpha: boolean;
+  hasExif: boolean;
+  exifMeta: StickerMetadata | null;
   frames: number;
   durationMs: number;
   durationSec: number;
@@ -11,7 +16,7 @@ export interface WebpInspection {
 }
 
 /**
- * Inspects a RIFF WebP container header and animation chunks (`VP8X`, `ALPH`, `ANMF`).
+ * Inspects a RIFF WebP container header, EXIF tag 0x5741, and animation chunks (`VP8X`, `ALPH`, `ANMF`).
  * Supports static VP8/VP8L/VP8X WebPs as well as multi-frame animated WebPs.
  */
 export function inspectWebpBuffer(buffer: Uint8Array): WebpInspection | null {
@@ -26,6 +31,7 @@ export function inspectWebpBuffer(buffer: Uint8Array): WebpInspection | null {
   let height: number | null = null;
   let animated = false;
   let hasAlpha = false;
+  let hasExif = false;
   let frames = 0;
   let durationMs = 0;
 
@@ -40,6 +46,7 @@ export function inspectWebpBuffer(buffer: Uint8Array): WebpInspection | null {
       const flags = buffer[data]!;
       animated = Boolean(flags & 0x02);
       hasAlpha = Boolean(flags & 0x10);
+      hasExif = Boolean(flags & 0x08);
       width = 1 + (buffer[data + 4]! | (buffer[data + 5]! << 8) | (buffer[data + 6]! << 16));
       height = 1 + (buffer[data + 7]! | (buffer[data + 8]! << 8) | (buffer[data + 9]! << 16));
     } else if (tag === 'VP8L' && size >= 5 && buffer[data] === 0x2f) {
@@ -52,6 +59,8 @@ export function inspectWebpBuffer(buffer: Uint8Array): WebpInspection | null {
       height = view.getUint16(data + 8, true) & 0x3fff;
     } else if (tag === 'ALPH') {
       hasAlpha = true;
+    } else if (tag === 'EXIF') {
+      hasExif = true;
     } else if (tag === 'ANMF' && size >= 16) {
       frames++;
       durationMs += buffer[data + 12]! | (buffer[data + 13]! << 8) | (buffer[data + 14]! << 16);
@@ -60,12 +69,16 @@ export function inspectWebpBuffer(buffer: Uint8Array): WebpInspection | null {
     pos = data + size + (size & 1);
   }
 
+  const exifMeta = hasExif ? extractWhatsAppExifMeta(buffer) : null;
+
   return {
     valid: width !== null && height !== null && width > 0 && height > 0,
     width,
     height,
     animated,
     hasAlpha,
+    hasExif: Boolean(hasExif || exifMeta),
+    exifMeta,
     frames: animated ? frames : 1,
     durationMs: animated ? durationMs : 0,
     durationSec: animated ? durationMs / 1000 : 0,

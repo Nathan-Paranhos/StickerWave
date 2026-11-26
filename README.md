@@ -1,6 +1,6 @@
 # StickerWave
 
-Estúdio web local para criar composições de mídia com som. O beta inclui o site de entrada em português e inglês, editor com até oito camadas e quatro faixas, catálogo com 120 efeitos, favoritos, biblioteca pessoal, PWA e Wavi 3D.
+Estúdio web local para criar composições de mídia com som. Desenvolvido por [Nathan Paranhos](https://nathan-paranhos.com.br/). O beta inclui o site de entrada em português e inglês, editor com até oito camadas e quatro faixas, catálogo com 120 efeitos, favoritos, biblioteca pessoal, PWA, Wavi 3D e integração nativa/cloud de figurinhas com áudio.
 
 ## Abrir o pacote
 
@@ -45,9 +45,9 @@ Para regenerar os 120 sons, execute `python scripts/generate-sounds.py`. A opç�
 
 Leia o [SDD](docs/SDD.md), a [arquitetura do WhatsApp Gateway](docs/architecture/whatsapp-gateway.md), o [protocolo de figurinhas sonoras](docs/protocol/sound-stickers.md), o [relatório de validação](qa/VALIDACAO.md), o [relatório de compatibilidade WhatsApp](docs/testing/compatibility-report.md) e os [avisos de licença](THIRD_PARTY_NOTICES.md).
 
-## StickerWave WhatsApp Gateway (Figurinhas Sonoras)
+## StickerWave WhatsApp Gateway & Core (Figurinhas Sonoras)
 
-O serviço isolado em `apps/whatsapp-gateway` processa mídia via FFmpeg/FFprobe (`libwebp` + `libopus`) e envia figurinhas sonoras nativas (`StickerMessage.audioMessage`, campo Protobuf `26`) por uma conta central de WhatsApp pareada via QR Code em `/whatsapp`.
+O serviço isolado em `apps/whatsapp-gateway` implementa o núcleo multimídia via FFmpeg/FFprobe (`libwebp` + `libopus`), injeção de metadados WebP EXIF `0x5741` com `sound-sha256` (`webp-exif.ts`), validação formal (`sticker-validator.ts`), ponte por plataforma (`sticker-import-bridge.ts`) e envio via Baileys com suporte dual ao protocolo (`envelope-134` padrão e fallback `sticker-26`), além das rotas `/api/stickers/process`, `/api/stickers/add-to-whatsapp`, `/api/v1/media/convert` e `/api/stickers/send`. Read more in [ADR-020](docs/adr/ADR-020-sound-sticker-protocol-v2-and-import-bridge.md) and [docs/protocol/sound-stickers.md](docs/protocol/sound-stickers.md).
 
 ```sh
 # 1) Configurar variáveis do gateway

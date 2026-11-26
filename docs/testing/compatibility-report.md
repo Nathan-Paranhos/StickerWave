@@ -1,35 +1,26 @@
-# Relatório de Testes e Compatibilidade — StickerWave WhatsApp Gateway
+# Relatório de Testes e Compatibilidade — StickerWave Core & WhatsApp Gateway
 
-Este documento registra com exatidão técnica o escopo executado, os resultados observados e o que exige validação manual em dispositivos físicos pareados com contas reais do WhatsApp.
+Este relatório registra com rigor técnico o que foi verificado por código, FFprobe/parser binário e Playwright Chromium, separando claramente o que depende de pareamento humano com dispositivo WhatsApp real.
 
-## 1. Testes automatizados executados
+## 1. Matriz de Casos Verificados Automaticamente
 
-Os resultados exatos após a última alteração devem ser conferidos diretamente na saída dos comandos abaixo (executados na etapa final de verificação):
-- `@stickerwave/whatsapp-gateway` (`npm run typecheck`, `npm run build`, `npm run poc`, `npm test` cobrindo `tests/protocol/`, `tests/unit/`, `tests/integration/`, `tests/security/`).
-- Raiz StickerWave (`npx tsc --noEmit`, `npm run build`, `npm test`, `npm run test:dist`, `qa/whatsapp-gateway.browser.mjs`, `qa/browser.mjs`).
+| Caso / Domínio | Escopo executado | Evidência objetiva | Status |
+| --- | --- | --- | --- |
+| Metadata Engine (`webp-exif.ts`) | Injeção + leitura TIFF `0x5741` e `sound-sha256`; promoção estática 1-frame WebP | Parser RIFF confirma `VP8X` (`animated=true`, `hasExif=true`), `ANIM`, `ANMF`, `EXIF` e digest exato | **PASS** (verificado nos testes do gateway) |
+| Sticker Validator (`sticker-validator.ts`) | Dimensão `512x512`, orçamentos `100 KB`/`500 KB`/`512 KB`, `OggS`, hash SHA-256 | Relatório `StickerValidationReport` emitido em `/api/stickers/process` | **PASS** |
+| Protocolo Dual (`SoundStickerProtocol`) | Estratégia B (`envelope-134`, `#134 -> #1 -> #26`, `#24/#25/#26`, `encode`/`decode`) + Estratégia A (`sticker-26`) | Parser schema-less `protobuf-wire.ts` e `proto.Message.decode` validam payload sem tocar em `node_modules` | **PASS** (mock + wire round-trip) |
+| Pipelines FFmpeg/FFprobe | PNG alfa + WAV/MP3, JPEG EXIF + WAV, GIF animado + WAV, WebM/MP4 extração de áudio | Outputs validados em bytes e streams (`libwebp`, `libopus`, `aac`) | **PASS** |
+| Rotas Canônicas & Segurança | `/api/stickers/process`, `/api/stickers/add-to-whatsapp`, `/api/whatsapp/*`, CORS, rate-limit, opt-in E.164, idempotência, SQLite WAL | Integração + E2E HTTP + testes de segurança | **PASS** |
+| Interface Web & Acessibilidade | Studio E2E desktop/mobile, PWA offline, contraste Axe WCAG 2.2 AA claro/escuro, créditos Nathan Paranhos | `qa/browser.mjs` + `qa/whatsapp-gateway.browser.mjs` | **PASS** (após última edição) |
 
-### O que foi comprovado por código e testes automatizados
-1. **Protocolo (`SoundStickerProtocol`):**
-   - Campo `26` (`wireTag 210`) serializado em `StickerMessage` com `AudioMessage` (`audio/ogg; codecs=opus`, `ptt: true`, `seconds`, `waveform` 64 barras) dentro de `proto.Message.encode`.
-   - Round-trip binário via parser Wire Schema-less confirma presença e integridade do áudio embutido antes do envio, isolando envios simultâneos via chave composta `fileSha256:fileEncSha256`.
-   - Figurinhas convencionais subsequentes permanecem sem campo `26`.
-2. **Motor multimídia FFmpeg/FFprobe (`ImageProcessor`, `AnimationProcessor`, `AudioProcessor`):**
-   - PNG com alfa → WebP 512×512 RGBA estático sem EXIF dentro do orçamento de bytes.
-   - GIF / WebM animado → WebP 512×512 RGBA em loop contínuo (`-loop 0`) com controle de FPS/qualidade para ≤ 500 KB.
-   - Extração de áudio de vídeos + conversão de WAV/áudios para Ogg/Opus 48 kHz mono + validação por decodificação integral + geração da waveform de 64 barras.
-   - Rejeição determinística de assinaturas corrompidas e payloads acima dos limites.
-3. **Gateway API, Fila, Conexão e Segurança:**
-   - Máquina de estados (`DISCONNECTED`, `CONNECTING`, `WAITING_QR`, `CONNECTED`, `RECONNECTING`, `LOGGED_OUT`), single-flight em `/connect`, geração de QR PNG via SSE e persistência criptografada AES-256-GCM em disco.
-   - Desafio opt-in via mensagem recebida pelo bot mockado, envio completo com atualização `SENT` → `DELIVERED` via ACK, `Idempotency-Key`, cancelamento pré-envio e recovery pós-queda (`SENDING` → `UNKNOWN`).
-   - Bloqueio `401` em rotas admin, `403` CORS, `400` SSRF e `429` rate limit.
+## 2. Matriz de Clientes Reais WhatsApp (Cenários ao Vivo)
 
-## 2. Matriz de Compatibilidade em Clientes Reais WhatsApp
+> **Bloqueio honesto de ambiente:** Este ambiente automatizado **não dispõe de celular físico com conta de teste WhatsApp nem câmera para leitura interativa do QR Code**. Conforme diretriz de integridade, nenhum envio real a aparelho foi forjado com sessão inventada. **Todos os testes ao vivo em aparelho físico permanecem explicitamente marcados como `BLOCKED` / `não executado`.**
 
-> **Aviso de integridade:** Nenhuma sessão ativa de WhatsApp pessoal/corporativa foi pareada via câmera de telefone neste ambiente automatizado. Todos os cenários ao vivo abaixo permanecem explicitamente marcados como **`não executado`** até que o administrador pareie uma conta de teste em `/whatsapp`.
-
-| Cliente / Cenário | Reproduzir som | Salvar / Favoritar | Encaminhar | Status | Observações |
-| --- | --- | --- | --- | --- | --- |
-| WhatsApp Android (celular oficial) | A testar | A testar | A testar | **não executado** | Requer pareamento QR ao vivo do bot em `/whatsapp` e envio para número autorizado |
-| WhatsApp Business Android | A testar | A testar | A testar | **não executado** | Validar exibição do ícone de áudio e encaminhamento mantendo áudio |
-| WhatsApp iOS (iPhone oficial / Business) | A testar | A testar | A testar | **não executado** | Verificar se `isAnimated` + Ogg/Opus 48kHz reproduzem no toque |
-| WhatsApp Web / Desktop | A testar | A testar | A testar | **não executado** | Clientes Web/Desktop podem variar suporte conforme versão do cliente |
+| ID | Cliente / Cenário ao vivo | Reprodução de áudio | Favoritar / Salvar na bandeja | Encaminhamento | Status | Motivo / Ação para destravar |
+| --- | --- | --- | --- | --- | --- | --- |
+| `CT-008` | WhatsApp Android (cliente oficial) | Pendente | Pendente | Pendente | **BLOCKED (não executado)** | Requer conta dedicada (`ENABLE_WA_BOT=true`), leitura QR manual em `/whatsapp` e envio para aparelho Android real |
+| `CT-009` | WhatsApp Business Android | Pendente | Pendente | Pendente | **BLOCKED (não executado)** | Mesmo bloqueio humano de pareamento QR e observação visual/auditiva no app |
+| `CT-010` | WhatsApp iOS (iPhone oficial / Business) | Pendente | Pendente | Pendente | **BLOCKED (não executado)** | Validar em iPhone físico se `envelope-134` (`isAnimated=true` + EXIF `0x5741` + `sound-sha256` + `Ogg/Opus` 48kHz) reproduz no toque |
+| `CT-011` | WhatsApp Web / Desktop | Pendente | Pendente | Pendente | **BLOCKED (não executado)** | Suporte varia por build Web/Desktop; validar em janela pareada com a mesma conta |
+| `CT-012` | Ponte Android/iOS nativa (`ENABLE_STICKER_PACK` / `UIPasteboard`) com som | N/A | N/A | N/A | **Limitação confirmada** | APIs oficiais `WhatsApp/stickers` não aceitam trilha de áudio no manifesto/pack; apenas WebP silencioso (3..30 por pack) |

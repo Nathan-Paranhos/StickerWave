@@ -46,7 +46,7 @@ test('FFmpegAdapter validates capabilities with libwebp and libopus installed', 
   assert.equal(caps.encoders.libopus, true);
 });
 
-test('CompositionPipeline processes PNG transparency + WAV into valid 512x512 WebP + Ogg/Opus', async () => {
+test('CompositionPipeline processes PNG transparency + WAV into EXIF-tagged 1-frame animated WebP + Ogg/Opus', async () => {
   const config = loadConfig();
   const pipeline = new CompositionPipeline(ffmpeg, config);
   const png = await fs.readFile(path.join(repoFixtures, 'transparency.png'));
@@ -58,9 +58,14 @@ test('CompositionPipeline processes PNG transparency + WAV into valid 512x512 We
     audioOptions: { trimStartMs: 0, trimEndMs: 500, fadeOutMs: 60, normalizePeak: true },
   });
 
-  assert.equal(result.isAnimated, false);
+  assert.equal(result.isAnimated, true);
   assert.equal(result.visualInspection.width, 512);
   assert.equal(result.visualInspection.height, 512);
+  assert.equal(result.visualInspection.hasExif, true);
+  assert.ok(result.exifMeta?.soundSha256);
+  assert.equal(result.validation.valid, true);
+  assert.equal(result.validation.hasExif0x5741, true);
+  assert.equal(result.validation.soundSha256MatchesAudio, true);
   assert.ok(result.webpBuffer.byteLength > 100 && result.webpBuffer.byteLength <= config.maxStickerBytes);
   assert.equal(result.audioStats.codec, 'opus');
   assert.equal(result.audioStats.sampleRate, 48000);
@@ -157,7 +162,8 @@ test('CompositionPipeline processes PNG + MP3, JPEG + WAV, MP4 + original audio,
 
     // 1) PNG + MP3
     const pngMp3 = await pipeline.process({ visualBytes: pngBytes, audioBytes: mp3Bytes });
-    assert.equal(pngMp3.isAnimated, false);
+    assert.equal(pngMp3.isAnimated, true);
+    assert.equal(pngMp3.validation.soundSha256MatchesAudio, true);
     assert.equal(pngMp3.audioStats.codec, 'opus');
     assert.ok(pngMp3.durationSec >= 2.0);
 

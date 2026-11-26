@@ -233,9 +233,15 @@ export interface GatewayCapabilitiesResponse {
   };
   baileysVersion: string;
   protocolField26Supported: boolean;
+  protocolStrategy?: SoundStickerProtocolStrategy;
+  supportedProtocolStrategies?: SoundStickerProtocolStrategy[];
   protocolMode: 'native' | 'patched-encoder' | 'unsupported';
   limits: typeof STICKER_LIMITS_PROFILE;
   maxParallelJobs: number;
+  authorCredit?: {
+    name: string;
+    url: string;
+  };
 }
 
 export interface GatewayHealthResponse {
@@ -256,4 +262,108 @@ export interface GatewayReadyResponse {
   whatsappStatus: WhatsAppConnectionStatus;
   soundStickersEnabled: boolean;
   reasons: string[];
+}
+
+export type StickerType = 'STATIC' | 'ANIMATED' | 'SOUND';
+
+export type SoundStickerProtocolStrategy = 'envelope-134' | 'sticker-26';
+
+export interface StickerMetadata {
+  packId: string;
+  packName: string;
+  packPublisher: string;
+  emojis: string[];
+  soundSha256?: string | null;
+  androidAppStoreLink?: string;
+  iosAppStoreLink?: string;
+}
+
+export interface StickerWaveProject {
+  id: string;
+  title: string;
+  caption?: string;
+  stickerType: StickerType;
+  durationMs: number;
+  fps: number;
+  audioEnabled: boolean;
+  shape?: StickerShapeOptions;
+  audio?: StickerAudioOptions;
+  metadata: StickerMetadata;
+}
+
+export interface StickerValidationReport {
+  valid: boolean;
+  stickerType: StickerType;
+  hasExif0x5741: boolean;
+  hasSoundSha256: boolean;
+  soundSha256MatchesAudio: boolean | null;
+  webpAnimated: boolean;
+  webpBytes: number;
+  audioBytes: number;
+  width: number | null;
+  height: number | null;
+  durationMs: number;
+  warnings: string[];
+  errors: string[];
+}
+
+export interface EncodedSoundSticker {
+  stickerType: StickerType;
+  protocolStrategy: SoundStickerProtocolStrategy;
+  width: number;
+  height: number;
+  animated: boolean;
+  hasAudio: boolean;
+  durationMs: number;
+  webpBytes: number;
+  oggBytes: number;
+  exifMeta: StickerMetadata | null;
+  waveform: number[];
+  validation: StickerValidationReport;
+  webpBase64: string;
+  oggBase64: string | null;
+}
+
+export type ClientPlatformTarget = 'web' | 'pwa' | 'android' | 'ios';
+
+export type AddToWhatsAppStrategy =
+  | 'wa-bot-relay'
+  | 'android-sticker-pack-manifest'
+  | 'ios-sticker-pasteboard-manifest'
+  | 'browser-download-fallback';
+
+export interface WhatsAppPackManifest {
+  android_play_store_link: string;
+  ios_app_store_link: string;
+  sticker_packs: Array<{
+    identifier: string;
+    name: string;
+    publisher: string;
+    tray_image_file: string;
+    image_data_version: string;
+    avoid_cache: boolean;
+    animated_sticker_pack: boolean;
+    publisher_website?: string;
+    stickers: Array<{
+      image_file: string;
+      emojis: string[];
+    }>;
+  }>;
+}
+
+export interface AddToWhatsAppResponse {
+  ok: boolean;
+  platform: ClientPlatformTarget;
+  strategy: AddToWhatsAppStrategy;
+  stickerType: StickerType;
+  supportsAudioInNativePackApi: boolean;
+  canDirectSendViaGateway: boolean;
+  supported: boolean;
+  headline: string;
+  explanation: string;
+  nextSteps: string[];
+  waMeUrl: string | null;
+  job: StickerSendJobSummary | null;
+  encodedSticker: EncodedSoundSticker | null;
+  packManifest: WhatsAppPackManifest | null;
 }
