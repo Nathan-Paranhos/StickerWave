@@ -1,0 +1,26 @@
+services:
+  whatsapp-gateway:
+    build:
+      context: .
+      dockerfile: apps/whatsapp-gateway/Dockerfile
+    container_name: stickerwave-whatsapp-gateway
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-3001}:3001"
+    env_file:
+      - apps/whatsapp-gateway/.env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      DATA_DIR: /data
+      SESSION_DIR: /data/session
+      DB_PATH: /data/gateway.db
+    volumes:
+      - stickerwave_gateway_data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  stickerwave_gateway_data:

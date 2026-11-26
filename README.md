@@ -43,4 +43,27 @@ O `netlify.toml` define o build e a pasta estática. `dist/` inclui `_redirects`
 
 Para regenerar os 120 sons, execute `python scripts/generate-sounds.py`. A opção `--limit 40` gera o catálogo da primeira homologação. Para regenerar os modelos, use `blender -b --python scripts/build-wavi.py -- public/models`.
 
-Leia o [SDD](docs/SDD.md), o [relatório de validação](qa/VALIDACAO.md) e os [avisos de licença](THIRD_PARTY_NOTICES.md).
+Leia o [SDD](docs/SDD.md), a [arquitetura do WhatsApp Gateway](docs/architecture/whatsapp-gateway.md), o [protocolo de figurinhas sonoras](docs/protocol/sound-stickers.md), o [relatório de validação](qa/VALIDACAO.md), o [relatório de compatibilidade WhatsApp](docs/testing/compatibility-report.md) e os [avisos de licença](THIRD_PARTY_NOTICES.md).
+
+## StickerWave WhatsApp Gateway (Figurinhas Sonoras)
+
+O serviço isolado em `apps/whatsapp-gateway` processa mídia via FFmpeg/FFprobe (`libwebp` + `libopus`) e envia figurinhas sonoras nativas (`StickerMessage.audioMessage`, campo Protobuf `26`) por uma conta central de WhatsApp pareada via QR Code em `/whatsapp`.
+
+```sh
+# 1) Configurar variáveis do gateway
+cp apps/whatsapp-gateway/.env.example apps/whatsapp-gateway/.env
+
+# 2) Executar gateway localmente (porta 3001)
+npm --prefix apps/whatsapp-gateway install
+npm --prefix apps/whatsapp-gateway run dev
+
+# 3) Testar protocolo, mídia FFmpeg, API, segurança e browser E2E
+npm --prefix apps/whatsapp-gateway test
+node qa/whatsapp-gateway.browser.mjs
+```
+
+Para subir em produção via Docker:
+
+```sh
+docker compose up -d --build
+```

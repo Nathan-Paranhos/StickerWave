@@ -18,7 +18,8 @@
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "test:dist": "node --test qa/dist.test.mjs",
-    "test:browser": "node qa/browser.mjs"
+    "test:browser": "node qa/browser.mjs",
+    "test:browser:gateway": "node qa/whatsapp-gateway.browser.mjs"
   },
   "dependencies": {
     "@ffmpeg/core": "0.12.10",

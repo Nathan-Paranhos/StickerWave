@@ -11,6 +11,7 @@ import { fetchCurrentUser, loginAccount, logoutAccount, registerAccount, type Au
 import { setStorageUser } from '../infrastructure/storage';
 
 const Studio = lazy(() => import('../features/studio'));
+const WhatsAppAdminPage = lazy(() => import('../features/whatsapp-admin').then(m => ({ default: m.WhatsAppAdminPage })));
 function readLocale(): Locale {
   try { return localStorage.getItem('stickerwave:language') === 'en' ? 'en' : 'pt'; }
   catch { return 'pt'; }
@@ -117,6 +118,7 @@ function App() {
               <button className="button button-outline" onClick={() => void logout()}>{copy.signOut}</button></div>
           </div></section>
         : studio ? <Suspense fallback={<p className="wrap page" role="status">{copy.starting}</p>}><Studio key={url} id={path.split('/')[2]} query={url.split('?')[1] ?? ''} /></Suspense>
+        : path === '/whatsapp' ? <Suspense fallback={<p className="wrap page" role="status">{copy.starting}</p>}><WhatsAppAdminPage /></Suspense>
         : path === '/' ? <Landing />
         : path === '/sounds' ? <SoundLibrary key="sounds" />
         : path === '/favorites' ? <SoundLibrary key="favorites" favoritesOnly />

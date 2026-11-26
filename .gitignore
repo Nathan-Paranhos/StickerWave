@@ -2,6 +2,20 @@ node_modules/
 dist/
 *.local
 .env
+.env.*
+!.env.example
+!apps/whatsapp-gateway/.env.example
 prisma/*.db
 prisma/*.db-*
+packages/*/dist/
+packages/*/tsconfig.tsbuildinfo
+apps/*/tsconfig.tsbuildinfo
+*.tsbuildinfo
+apps/*/dist/
+apps/*/data/
+apps/*/node_modules/
+apps/whatsapp-gateway/*.db
+apps/whatsapp-gateway/*.db-*
+outputs/
+
 

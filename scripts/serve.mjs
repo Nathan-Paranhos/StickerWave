@@ -1,4 +1,5 @@
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
@@ -19,14 +20,36 @@ const securityHeaders = {
   'Permissions-Policy': 'microphone=(self), camera=(), geolocation=()',
 };
 
-export function createDistributionServer({ download, databaseUrl, prisma: externalPrisma } = {}) {
+export function createDistributionServer({ download, databaseUrl, prisma: externalPrisma, gatewayUrl = process.env.GATEWAY_URL || 'http://127.0.0.1:3001' } = {}) {
   const ownsPrisma = !externalPrisma && Boolean(databaseUrl);
   const prisma = externalPrisma ?? (databaseUrl ? createPrismaClient(databaseUrl) : getPrisma());
   const ready = ensureSqliteSchema(prisma).catch(() => undefined);
 
   const server = createServer(async (request, response) => {
     try {
-      const pathname = decodeURIComponent(new URL(request.url ?? '/', 'http://localhost').pathname);
+      const parsedUrl = new URL(request.url ?? '/', 'http://localhost');
+      const pathname = decodeURIComponent(parsedUrl.pathname);
+      if (pathname.startsWith('/gateway/')) {
+        const targetUrl = new URL(pathname.replace(/^\/gateway/, '') + parsedUrl.search, gatewayUrl);
+        const requester = targetUrl.protocol === 'https:' ? httpsRequest : httpRequest;
+        const headers = { ...request.headers, host: targetUrl.host };
+        const proxyReq = requester(
+          targetUrl,
+          { method: request.method, headers },
+          proxyRes => {
+            response.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+            proxyRes.pipe(response);
+          },
+        );
+        proxyReq.on('error', () => {
+          if (!response.headersSent) {
+            response.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
+          }
+          response.end(JSON.stringify({ ok: false, code: 'GW-5030', message: 'StickerWave WhatsApp Gateway inacessível.' }));
+        });
+        request.pipe(proxyReq);
+        return;
+      }
       if (pathname.startsWith('/api/')) {
         await ready;
         await handleApiRequest(request, response, pathname, prisma);

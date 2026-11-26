@@ -1,0 +1,184 @@
+openapi: 3.1.0
+info:
+  title: StickerWave WhatsApp Gateway API
+  version: 1.0.0
+  description: >
+    API REST + SSE do serviço isolado StickerWave WhatsApp Gateway para processamento multimídia
+    (WebP 512x512 + Ogg/Opus) e entrega direta de figurinhas sonoras via bot central WhatsApp (Baileys).
+servers:
+  - url: http://127.0.0.1:3001
+    description: Local / Docker gateway
+components:
+  securitySchemes:
+    AdminBearer:
+      type: http
+      scheme: bearer
+      description: GATEWAY_ADMIN_SECRET para administração do pareamento e fila.
+paths:
+  /health:
+    get:
+      summary: Liveness check
+      responses:
+        '200':
+          description: Gateway em execução
+  /ready:
+    get:
+      summary: Readiness check (FFmpeg, SQLite, SoundStickerProtocol e estado do bot WhatsApp)
+      responses:
+        '200':
+          description: Pronto para processar mídia
+        '503':
+          description: Dependência crítica indisponível
+  /api/v1/openapi.json:
+    get:
+      summary: Documento OpenAPI em JSON
+      responses:
+        '200':
+          description: Schema OpenAPI 3.1
+  /api/v1/capabilities:
+    get:
+      summary: Capacidades declaradas, limites oficiais vs experimentais e modo do protocolo
+      responses:
+        '200':
+          description: Capacidades do gateway
+  /api/v1/admin/whatsapp/auth/verify:
+    post:
+      security:
+        - AdminBearer: []
+      summary: Valida GATEWAY_ADMIN_SECRET antes de abrir o painel administrativo
+      responses:
+        '200':
+          description: Credencial válida
+        '401':
+          description: Não autorizado
+  /api/v1/admin/whatsapp/status:
+    get:
+      security:
+        - AdminBearer: []
+      summary: Estado atual da conexão WhatsApp do bot central
+      responses:
+        '200':
+          description: Snapshot de conexão
+  /api/v1/admin/whatsapp/qr:
+    get:
+      security:
+        - AdminBearer: []
+      summary: Data URL PNG do QR Code atual para pareamento
+      responses:
+        '200':
+          description: QR Code ou estado conectado
+  /api/v1/admin/whatsapp/events:
+    get:
+      security:
+        - AdminBearer: []
+      summary: Stream SSE com atualizações de conexão e novos QR Codes em tempo real
+      responses:
+        '200':
+          description: text/event-stream
+  /api/v1/admin/whatsapp/connect:
+    post:
+      security:
+        - AdminBearer: []
+      summary: Inicia ou retoma conexão WebSocket Baileys
+      responses:
+        '200':
+          description: Snapshot atualizado
+  /api/v1/admin/whatsapp/reconnect:
+    post:
+      security:
+        - AdminBearer: []
+      summary: Força reconexão da sessão salva
+      responses:
+        '200':
+          description: Snapshot atualizado
+  /api/v1/admin/whatsapp/disconnect:
+    post:
+      security:
+        - AdminBearer: []
+      summary: Desconecta e opcionalmente remove a sessão criptografada
+      responses:
+        '200':
+          description: Snapshot desconectado
+  /api/v1/admin/metrics:
+    get:
+      security:
+        - AdminBearer: []
+      summary: Métricas agregadas de fila, tempo médio e destinatários autorizados
+      responses:
+        '200':
+          description: Snapshot de métricas
+  /api/v1/admin/jobs:
+    get:
+      security:
+        - AdminBearer: []
+      summary: Lista recente de jobs com números mascarados
+      responses:
+        '200':
+          description: Lista de jobs
+  /api/v1/phones/validate:
+    post:
+      summary: Normaliza e valida número no formato E.164 com libphonenumber-js
+      responses:
+        '200':
+          description: Resultado da validação
+  /api/v1/recipients/authorization-request:
+    post:
+      summary: Gera desafio opt-in de 6 caracteres e deep link wa.me para o destinatário
+      responses:
+        '200':
+          description: Desafio emitido
+  /api/v1/recipients/authorization-status:
+    get:
+      summary: Consulta se o número já autorizou recebimentos
+      responses:
+        '200':
+          description: Status de autorização
+  /api/v1/recipients/authorization-confirm:
+    post:
+      summary: Confirma autorização com telefone E.164 e código de desafio válido
+      responses:
+        '200':
+          description: Autorizado
+  /api/v1/recipients/authorization:
+    delete:
+      summary: Revoga autorização opt-in do destinatário
+      responses:
+        '200':
+          description: Revogado
+  /api/v1/stickers/send:
+    post:
+      summary: Enfileira processamento multimídia e entrega direta da figurinha sonora
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Job criado na fila
+        '200':
+          description: Job deduplicado por Idempotency-Key
+        '403':
+          description: Destinatário não autorizado
+        '429':
+          description: Rate limit atingido
+  /api/v1/stickers/jobs/{jobId}:
+    get:
+      summary: Consulta status detalhado de um job
+      responses:
+        '200':
+          description: Job encontrado
+  /api/v1/stickers/jobs/{jobId}/events:
+    get:
+      summary: Stream SSE com progresso em tempo real do processamento e envio
+      responses:
+        '200':
+          description: text/event-stream
+  /api/v1/stickers/jobs/{jobId}/cancel:
+    post:
+      summary: Cancela job antes do estágio de upload/envio ao WhatsApp
+      responses:
+        '200':
+          description: Job cancelado
+        '409':
+          description: Job não cancelável no estado atual

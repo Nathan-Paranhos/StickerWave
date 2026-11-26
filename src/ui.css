@@ -346,6 +346,8 @@ progress { height: 13px; width: 100%; accent-color: #6a923b; }
   .studio-actions { gap: 3px; }
   .studio-actions .icon-button, .projects-icon { min-width: 40px; width: 40px; }
   .studio-actions .studio-diagnostic, .studio-actions .studio-lang { display: none; }
+  .studio-actions .wa-send-header-btn { min-width: 40px; width: 40px; padding: 0; }
+  .studio-actions .wa-send-header-btn span { display: none; }
   .studio-actions .export-button { padding-inline: 10px; gap: 4px; }
   .project-heading input { font-size: 16px; }
   .save-state span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -360,7 +362,7 @@ progress { height: 13px; width: 100%; accent-color: #6a923b; }
 @media (max-width: 470px) {
   .wrap { width: calc(100% - 24px); }
   .studio-brand { width: 36px; flex: 0 0 36px; height: 40px; }
-  .studio-actions .icon-button, .projects-icon { min-width: 36px; width: 36px; }
+  .studio-actions .icon-button, .projects-icon, .studio-actions .wa-send-header-btn { min-width: 36px; width: 36px; }
   .studio-actions .export-button { padding-inline: 9px; font-size: .82rem; }
   .auth-card { padding: 20px 16px; border-radius: 16px; }
   .brand { gap: 7px; font-size: 1.08rem; }
@@ -568,3 +570,66 @@ progress { height: 13px; width: 100%; accent-color: #6a923b; }
 [data-theme="dark"] .whatsapp-direct-copy strong { color: #eef7df; }
 [data-theme="dark"] .whatsapp-direct-copy p { color: #cbdabf; }
 [data-theme="dark"] .nav-mobile-auth { color: #d8ead1; }
+
+.spin { animation: sw-spin 1s linear infinite; }
+@keyframes sw-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.wa-admin-page { display: grid; gap: 22px; }
+.wa-admin-header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.wa-admin-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 820px) { .wa-admin-grid { grid-template-columns: 1fr; } }
+.wa-card { display: grid; gap: 14px; align-content: start; padding: 20px; border-radius: 16px; border: 1px solid var(--stone); background: #fff; }
+.wa-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.wa-card-head h2 { font-size: 1.15rem; }
+.wa-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: .78rem; font-weight: 800; }
+.wa-badge-ok { background: #e3f4ca; color: #244510; }
+.wa-badge-warn { background: #f8eed0; color: #5b430e; }
+.wa-badge-err { background: #fbe4e6; color: #7e1f26; }
+.wa-meta-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.wa-meta-list dt { font-size: .75rem; font-weight: 750; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.wa-meta-list dd { margin: 2px 0 0; font-weight: 700; font-size: .92rem; }
+.wa-qr-box { display: grid; justify-items: center; gap: 10px; text-align: center; padding: 12px; border-radius: 12px; background: #fbfcfa; border: 1px solid var(--stone); }
+.wa-qr-box img { border-radius: 10px; background: #fff; padding: 6px; border: 1px solid #d9dfd2; }
+.wa-qr-placeholder { display: grid; justify-items: center; gap: 10px; text-align: center; padding: 28px 16px; border-radius: 12px; background: #f5f7f2; color: var(--muted); }
+.wa-metric-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.wa-metric-grid > div { display: grid; gap: 2px; padding: 10px 12px; border-radius: 12px; background: #f7f8f4; border: 1px solid var(--stone); }
+.wa-metric-grid strong { font-size: 1.35rem; font-weight: 800; }
+.wa-metric-grid span { font-size: .78rem; color: var(--muted); }
+.wa-table-wrap { overflow-x: auto; }
+.wa-jobs-table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+.wa-jobs-table th, .wa-jobs-table td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--stone); }
+
+.wa-send-modal { display: grid; gap: 14px; }
+.wa-send-preview { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--stone); background: repeating-conic-gradient(#e4e9df 0% 25%, #fafbf9 0% 50%) 0 / 14px 14px; }
+.wa-send-preview img { width: 76px; height: 76px; object-fit: contain; border-radius: 10px; background: transparent; flex: 0 0 auto; }
+.wa-send-preview-meta { display: grid; gap: 6px; min-width: 0; }
+[data-theme="dark"] .wa-send-preview { background: repeating-conic-gradient(#242b23 0% 25%, #192019 0% 50%) 0 / 14px 14px; border-color: var(--stone); }
+.wa-send-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.wa-send-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; background: #edf4db; color: #243817; font-size: .82rem; font-weight: 750; }
+.wa-phone-row { display: grid; grid-template-columns: 160px 1fr; gap: 10px; }
+@media (max-width: 560px) { .wa-phone-row { grid-template-columns: 1fr; } }
+.wa-phone-row select { min-height: 44px; padding: 0 10px; border-radius: 10px; border: 1px solid #cfd6c9; background: #fbfcfa; color: var(--carbon); font-weight: 600; }
+.wa-phone-input-group { display: flex; gap: 8px; }
+.wa-phone-input-group input { flex: 1; min-width: 0; }
+.wa-optin-box { display: grid; gap: 10px; padding: 14px; border-radius: 12px; background: #f4f7ee; border: 1px solid #d4e2bc; }
+.wa-code-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.wa-code-banner code { padding: 6px 12px; border-radius: 8px; background: #171a17; color: #c9f45a; font-size: 1rem; font-weight: 800; letter-spacing: .12em; }
+.wa-manual-confirm { display: flex; flex-wrap: wrap; gap: 8px; }
+.wa-manual-confirm input { flex: 1; min-width: 140px; min-height: 39px; padding: 0 10px; border-radius: 9px; border: 1px solid #cfd6c9; background: #fff; }
+.wa-job-progress { display: grid; gap: 8px; padding: 14px; border-radius: 12px; border: 1px solid var(--stone); background: #fbfcfa; }
+.wa-job-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wa-job-head strong { display: inline-flex; align-items: center; gap: 6px; }
+.wa-progress-bar { width: 100%; height: 10px; accent-color: #7ca324; }
+.wa-inline-icon { display: inline-flex; align-items: center; gap: 6px; }
+
+[data-theme="dark"] .wa-card,
+[data-theme="dark"] .wa-job-progress { background: #202620; border-color: var(--stone); }
+[data-theme="dark"] .wa-qr-box,
+[data-theme="dark"] .wa-qr-placeholder,
+[data-theme="dark"] .wa-metric-grid > div { background: #192019; border-color: var(--stone); }
+[data-theme="dark"] .wa-optin-box { background: #243022; border-color: #41553c; }
+[data-theme="dark"] .wa-send-chip { background: #314127; color: #dcf0b9; }
+[data-theme="dark"] .wa-badge-ok { background: #2b451c; color: #d5f2a2; }
+[data-theme="dark"] .wa-badge-warn { background: #463712; color: #f7df99; }
+[data-theme="dark"] .wa-badge-err { background: #4f2124; color: #ffbabd; }
+

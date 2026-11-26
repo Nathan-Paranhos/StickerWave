@@ -1,0 +1,38 @@
+{
+  "name": "@stickerwave/whatsapp-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated WhatsApp Gateway service for StickerWave Sound Stickers via Baileys and FFmpeg.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build:contracts": "npm --prefix ../../packages/contracts run build",
+    "dev": "npm run build:contracts && tsx watch src/index.ts",
+    "build": "npm run build:contracts && tsc -p tsconfig.json",
+    "typecheck": "npm run build:contracts && tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "poc": "npm run build:contracts && tsx src/poc.ts",
+    "test": "npm run build:contracts && tsx --test tests/**/*.test.ts",
+    "test:unit": "npm run build:contracts && tsx --test tests/unit/*.test.ts",
+    "test:protocol": "npm run build:contracts && tsx --test tests/protocol/*.test.ts",
+    "test:integration": "npm run build:contracts && tsx --test tests/integration/*.test.ts",
+    "test:security": "npm run build:contracts && tsx --test tests/security/*.test.ts"
+  },
+  "dependencies": {
+    "@stickerwave/contracts": "file:../../packages/contracts",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "libphonenumber-js": "^1.13.17",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.5",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

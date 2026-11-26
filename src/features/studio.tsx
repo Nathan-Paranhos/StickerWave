@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from 'react';
-import { AudioLines, CloudDownload, Download, FolderOpen, Globe2, ImagePlus, Layers, LoaderCircle, LogOut, Play, Redo2, Sparkles, Square, Undo2, Upload, Volume2, VolumeX, WifiOff, Wrench, Type } from 'lucide-react';
+import { AudioLines, CloudDownload, Download, FolderOpen, Globe2, ImagePlus, Layers, LoaderCircle, LogOut, Play, Redo2, Send, Sparkles, Square, Undo2, Upload, Volume2, VolumeX, WifiOff, Wrench, Type } from 'lucide-react';
 import { Link, useApp } from '../app/context';
 import { Bars, Modal, Notice } from '../app/shared';
 import { audioTracks, clamp, createProject, initialSound, initialVisual, motion, newTrim, projectRefs, trackDuration, updateTrim, visualLayers, MAX_DURATION, MAX_LAYERS, MAX_TRACKS, type Project, type StoredAsset, type Trim } from '../core/project';
@@ -9,6 +9,7 @@ import { keepSound, load, personalSound } from '../infrastructure/storage';
 import { errorCode, type ErrorCode } from '../locales';
 import { useDraft } from './draft';
 import { ExportDialog } from './export-dialog';
+import { SendToWhatsAppModal } from './whatsapp-send-modal';
 import { Inspector, type Tab } from './inspector';
 import { capabilities } from './pages';
 import { Wavi } from './wavi';
@@ -53,6 +54,7 @@ function Editor({ session, query }: { session: Session; query: string }) {
   const [library, setLibrary] = useState(false);
   const [activeTrack, setActiveTrack] = useState('primary-audio');
   const [exporting, setExporting] = useState(false);
+  const [sendingWa, setSendingWa] = useState(false);
   const [diagnostics, setDiagnostics] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
   const [notice, setNotice] = useState<ErrorCode>();
@@ -382,6 +384,7 @@ function Editor({ session, query }: { session: Session; query: string }) {
         <button className="icon-button studio-diagnostic" title={copy.diagnostic} aria-label={copy.diagnostic} onClick={() => setDiagnostics(true)}><Wrench size={17} /></button>
         <button className="language studio-lang" aria-label={`${locale.toUpperCase()} · ${copy.language}`} onClick={toggleLanguage}><Globe2 size={16} />{locale === 'pt' ? 'PT' : 'EN'}</button>
         <button className="icon-button studio-logout" title={copy.signOut} aria-label={copy.signOut} onClick={() => void draft.drain().then(() => logout())}><LogOut size={17} /></button>
+        <button className="button button-outline wa-send-header-btn" aria-label={copy.waSendButton} title={copy.waSendButton} onClick={() => { preview.halt(); setSendingWa(true); }} disabled={!haveComposition || Boolean(job)}><Send size={17} /><span>{copy.waSendButton}</span></button>
         <button className="button button-green export-button" onClick={() => { preview.halt(); setExporting(true); }} disabled={!haveComposition || Boolean(job)}><Download size={18} />{copy.export}</button>
       </div>
     </header>
@@ -467,7 +470,10 @@ function Editor({ session, query }: { session: Session; query: string }) {
             </div>
             {previewMode === 'whatsapp' && haveComposition && <div className="whatsapp-bubble-meta">
               <span>{copy.tapToPlaySticker}</span>
-              <button type="button" className="button button-green button-small" onClick={() => { preview.halt(); setExporting(true); }}>
+              <button type="button" className="button button-green button-small" onClick={() => { preview.halt(); setSendingWa(true); }}>
+                <Send size={15} />{copy.waSendButton}
+              </button>
+              <button type="button" className="button button-outline button-small" onClick={() => { preview.halt(); setExporting(true); }}>
                 <Download size={15} />{copy.whatsappDirectAction}
               </button>
             </div>}
@@ -545,6 +551,7 @@ function Editor({ session, query }: { session: Session; query: string }) {
     </div>
     {library && <Modal title={copy.catalogTitle} close={() => setLibrary(false)} className="library-modal"><SoundLibrary select={sound => void choose(sound)} /></Modal>}
     {exporting && <ExportDialog project={project} assets={assets} frame={preview.position} close={() => setExporting(false)} />}
+    {sendingWa && <SendToWhatsAppModal project={project} assets={assets} close={() => setSendingWa(false)} onFallbackLocalExport={() => { setSendingWa(false); setExporting(true); }} />}
     {diagnostics && <Modal title={copy.diagnostic} close={() => setDiagnostics(false)}>
       <p>{copy.noUpload}</p>
       <dl className="capabilities">{Object.entries(capabilities()).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ? copy.supported : copy.unavailable}</dd></div>)}</dl>
