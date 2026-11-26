@@ -74,6 +74,9 @@ export function WhatsAppAdminPage() {
   const { copy, locale } = useApp();
   const [gatewayUrlInput, setGatewayUrlInput] = useState(() => getLocalGatewayUrlOverride() || '/gateway');
   const [publishUrlToSite, setPublishUrlToSite] = useState(false);
+  const [publicUrlSaved, setPublicUrlSaved] = useState(false);
+  const [publicCheckBusy, setPublicCheckBusy] = useState(false);
+  const [publicError, setPublicError] = useState<string | null>(null);
   const [secretInput, setSecretInput] = useState(readStoredAdminSecret);
   const [adminSecret, setAdminSecret] = useState<string | null>(null);
   const [showSecret, setShowSecret] = useState(false);
@@ -115,12 +118,32 @@ export function WhatsAppAdminPage() {
     }
   }, [copy.waAdminInvalidSecret, copy.waGatewayOffline]);
 
+  const probePublicStatus = useCallback(async () => {
+    setPublicCheckBusy(true);
+    setPublicError(null);
+    try {
+      const [readyInfo, capInfo] = await Promise.all([
+        fetchGatewayReady(),
+        fetchGatewayCapabilities().catch(() => null),
+      ]);
+      setReadyState(readyInfo);
+      if (capInfo) setCapabilities(capInfo);
+    } catch (err) {
+      setReadyState(null);
+      setCapabilities(null);
+      setPublicError(err instanceof Error ? err.message : copy.waGatewayOffline);
+    } finally {
+      setPublicCheckBusy(false);
+    }
+  }, [copy.waGatewayOffline]);
+
   // Verify existing sessionStorage secret and discover configured gateway URL on mount
   useEffect(() => {
     let mounted = true;
     void resolveGatewayBaseUrl().then((resolved) => {
       if (!mounted) return;
       setGatewayUrlInput(resolved);
+      void probePublicStatus();
     });
 
     const initial = readStoredAdminSecret();
@@ -141,7 +164,14 @@ export function WhatsAppAdminPage() {
     return () => {
       mounted = false;
     };
-  }, [loadDashboard]);
+  }, [loadDashboard, probePublicStatus]);
+
+  function handleSaveBrowserGatewayUrl() {
+    const urlTrimmed = gatewayUrlInput.trim() || '/gateway';
+    setLocalGatewayUrlOverride(urlTrimmed === '/gateway' ? null : urlTrimmed);
+    setPublicUrlSaved(true);
+    void probePublicStatus();
+  }
 
   // Keep live SSE subscription open while authenticated
   useEffect(() => {
@@ -236,15 +266,30 @@ export function WhatsAppAdminPage() {
 
   if (!adminSecret) {
     return (
-      <section className="wrap page auth-page">
-        <div className="auth-card">
-          <p className="eyebrow">
-            <ShieldCheck size={16} />
-            {copy.waAdminEyebrow}
-          </p>
-          <h1>{copy.waAdminTitle}</h1>
-          <p className="page-intro">{copy.waAdminAuthSubtitle}</p>
-          <form className="auth-form" onSubmit={(e) => void handleAdminSignIn(e)}>
+      <section className="wrap page wa-admin-page">
+        <div className="wa-admin-header">
+          <div>
+            <p className="eyebrow">
+              <Smartphone size={16} />
+              {copy.waAdminEyebrow}
+            </p>
+            <h1>{copy.waAdminTitle}</h1>
+            <p className="page-intro">{copy.waAdminSubtitle}</p>
+          </div>
+        </div>
+
+        <div className="wa-admin-grid">
+          <article className="wa-card">
+            <div className="wa-card-head">
+              <h2>{copy.waConfigServerCardTitle}</h2>
+              <span className={`wa-badge wa-badge-${readyState?.ready ? 'ok' : publicError ? 'err' : 'warn'}`}>
+                {readyState?.ready ? <Wifi size={14} /> : <WifiOff size={14} />}
+                {readyState?.ready
+                  ? (readyState.whatsappConnected ? copy.waSendBotOnline : copy.waCloudBadge)
+                  : (publicCheckBusy ? copy.waSendCheckingGateway : copy.waAdminUnavailable)}
+              </span>
+            </div>
+
             <label className="auth-field">
               <span>{copy.waAdminGatewayUrlLabel}</span>
               <input
@@ -252,50 +297,100 @@ export function WhatsAppAdminPage() {
                 value={gatewayUrlInput}
                 onChange={(e) => {
                   setGatewayUrlInput(e.target.value);
+                  setPublicUrlSaved(false);
                 }}
                 placeholder="/gateway ou https://seu-gateway.onrender.com"
               />
               <small>{copy.waAdminGatewayUrlHint}</small>
             </label>
-            {gatewayUrlInput.trim().startsWith('http') && (
-              <label className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={publishUrlToSite}
-                  onChange={(e) => setPublishUrlToSite(e.target.checked)}
-                />
-                <span>{copy.waAdminPublishSiteUrl}</span>
-              </label>
+
+            <div className="button-row">
+              <button type="button" className="button button-outline button-small" onClick={handleSaveBrowserGatewayUrl} disabled={publicCheckBusy}>
+                {copy.waConfigSaveLocalBtn}
+              </button>
+              <button type="button" className="button button-outline button-small" onClick={() => void probePublicStatus()} disabled={publicCheckBusy}>
+                <RefreshCw size={14} />
+                {copy.waConfigTestBtn}
+              </button>
+            </div>
+            {publicUrlSaved && <Notice>{copy.waConfigSavedLocal}</Notice>}
+            {publicError && <Notice error>{publicError}</Notice>}
+
+            {readyState && (
+              <dl className="wa-meta-list">
+                <div>
+                  <dt>Cloud Media / FFmpeg</dt>
+                  <dd>{readyState.ffmpegReady ? 'OK (WebP + Opus + MP4)' : copy.waAdminUnavailable}</dd>
+                </div>
+                <div>
+                  <dt>Protocolo</dt>
+                  <dd>{capabilities?.protocolStrategy ?? (readyState.protocolReady ? 'envelope-134' : copy.waAdminUnavailable)}</dd>
+                </div>
+                <div>
+                  <dt>Bot WhatsApp (ENABLE_WA_BOT)</dt>
+                  <dd>{readyState.whatsappBotEnabled ? `ON (${readyState.whatsappStatus})` : 'OFF (Cloud Mode)'}</dd>
+                </div>
+              </dl>
             )}
-            <label className="auth-field">
-              <span>{copy.waAdminSecretLabel}</span>
-              <div className="password-wrap">
-                <input
-                  type={showSecret ? 'text' : 'password'}
-                  value={secretInput}
-                  onChange={(e) => setSecretInput(e.target.value)}
-                  placeholder="GATEWAY_ADMIN_SECRET"
-                  autoComplete="current-password"
-                  required
-                />
-                <button
-                  type="button"
-                  className="password-eye"
-                  aria-label={showSecret ? copy.hidePassword : copy.showPassword}
-                  onClick={() => setShowSecret((v) => !v)}
-                >
-                  {showSecret ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-              <small>{copy.waAdminSecretHint}</small>
-            </label>
-            {authError && <Notice error>{authError}</Notice>}
-            <button type="submit" className="button button-green full" disabled={authBusy}>
-              <ShieldCheck size={17} />
-              {authBusy ? copy.checkingAccount : copy.waAdminUnlock}
-            </button>
-            <p className="auth-note">{copy.waAdminSetupTip}</p>
-          </form>
+            {readyState && readyState.whatsappBotEnabled === false && (
+              <Notice>{copy.waConfigBotDisabledHint}</Notice>
+            )}
+
+            <div className="wa-compat-guide">
+              <strong>{copy.waConfigCompatTitle}</strong>
+              <p>{copy.waConfigCompatWebDesktop}</p>
+              <p>{copy.waConfigCompatMobile}</p>
+            </div>
+          </article>
+
+          <article className="wa-card">
+            <div className="wa-card-head">
+              <h2>
+                <ShieldCheck size={18} /> {copy.waAdminUnlock}
+              </h2>
+            </div>
+            <p className="page-intro">{copy.waAdminAuthSubtitle}</p>
+            <form className="auth-form" onSubmit={(e) => void handleAdminSignIn(e)}>
+              {gatewayUrlInput.trim().startsWith('http') && (
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={publishUrlToSite}
+                    onChange={(e) => setPublishUrlToSite(e.target.checked)}
+                  />
+                  <span>{copy.waAdminPublishSiteUrl}</span>
+                </label>
+              )}
+              <label className="auth-field">
+                <span>{copy.waAdminSecretLabel}</span>
+                <div className="password-wrap">
+                  <input
+                    type={showSecret ? 'text' : 'password'}
+                    value={secretInput}
+                    onChange={(e) => setSecretInput(e.target.value)}
+                    placeholder="GATEWAY_ADMIN_SECRET"
+                    autoComplete="current-password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="password-eye"
+                    aria-label={showSecret ? copy.hidePassword : copy.showPassword}
+                    onClick={() => setShowSecret((v) => !v)}
+                  >
+                    {showSecret ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+                <small>{copy.waAdminSecretHint}</small>
+              </label>
+              {authError && <Notice error>{authError}</Notice>}
+              <button type="submit" className="button button-green full" disabled={authBusy}>
+                <ShieldCheck size={17} />
+                {authBusy ? copy.checkingAccount : copy.waAdminUnlock}
+              </button>
+              <p className="auth-note">{copy.waAdminSetupTip}</p>
+            </form>
+          </article>
         </div>
       </section>
     );

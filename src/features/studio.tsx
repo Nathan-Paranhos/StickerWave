@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from 'react';
-import { AudioLines, CheckCircle2, CloudDownload, Download, FolderOpen, Globe2, ImagePlus, Layers, LoaderCircle, LogOut, Play, Redo2, Send, Sparkles, Square, Undo2, Upload, Volume2, VolumeX, WifiOff, Wrench, Type } from 'lucide-react';
+import { AudioLines, CheckCircle2, CloudDownload, Download, FolderOpen, Globe2, ImagePlus, Layers, LoaderCircle, LogOut, MessageCircle, Play, Redo2, Send, Sparkles, Square, Undo2, Upload, Volume2, VolumeX, WifiOff, Wrench, Type } from 'lucide-react';
 import { Link, useApp } from '../app/context';
 import { Bars, Modal, Notice } from '../app/shared';
 import { audioTracks, clamp, createProject, initialSound, initialVisual, motion, newTrim, projectRefs, trackDuration, updateTrim, visualLayers, MAX_DURATION, MAX_LAYERS, MAX_TRACKS, type Project, type StoredAsset, type Trim } from '../core/project';
@@ -396,6 +396,7 @@ function Editor({ session, query }: { session: Session; query: string }) {
         <button className="icon-button studio-diagnostic" title={copy.diagnostic} aria-label={copy.diagnostic} onClick={() => setDiagnostics(true)}><Wrench size={17} /></button>
         <button className="language studio-lang" aria-label={`${locale.toUpperCase()} · ${copy.language}`} onClick={toggleLanguage}><Globe2 size={16} />{locale === 'pt' ? 'PT' : 'EN'}</button>
         <button className="icon-button studio-logout" title={copy.signOut} aria-label={copy.signOut} onClick={() => void draft.drain().then(() => logout())}><LogOut size={17} /></button>
+        <Link className="icon-button studio-wa-config" href="/whatsapp" title={copy.whatsappConfigure} aria-label={copy.whatsappConfigure} onClick={event => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); void draft.drain().then(() => navigate('/whatsapp')); } }}><MessageCircle size={18} /></Link>
         <button className="button button-outline wa-send-header-btn" aria-label={gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled ? copy.waCloudWhatsAppAction : copy.waSendButton} title={gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled ? copy.waCloudWhatsAppAction : copy.waSendButton} onClick={() => { preview.halt(); if (gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled) { setExportFocus('whatsapp'); setExporting(true); } else setSendingWa(true); }} disabled={!haveComposition || Boolean(job)}><Send size={17} /><span>{gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled ? copy.waCloudWhatsAppAction : copy.waSendButton}</span></button>
         <button className="button button-green export-button" onClick={() => { preview.halt(); setExportFocus('all'); setExporting(true); }} disabled={!haveComposition || Boolean(job)}><Download size={18} />{copy.export}</button>
       </div>

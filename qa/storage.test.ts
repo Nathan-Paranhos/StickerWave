@@ -41,6 +41,41 @@ test('rejects partial projects before committing any metadata', async () => {
   assert.equal(await load(project.id), null);
 });
 
+test('heals missing local IndexedDB media blobs on load without SW-4002 and keeps project editable', async () => {
+  const blob = new Blob(['png-bytes'], { type: 'image/png' });
+  const asset: StoredAsset = {
+    id: crypto.randomUUID(), mime: 'image/png', sha256: '1'.repeat(64), size: blob.size,
+    name: 'evicted.png', duration: 0, width: 512, height: 512, blob,
+  };
+  const base = createProject('Projeto Recuperado');
+  base.text.content = 'Texto preservado';
+  base.media = asset.id;
+  base.visualOptions = [asset.id];
+  const saved = await save(base, new Map([[asset.id, asset]]), null);
+
+  // Simulate IndexedDB blob eviction while keeping project record intact
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const req = indexedDB.open('stickerwave', 2);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('assets', 'readwrite');
+    tx.objectStore('assets').delete(asset.id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+
+  const healed = await load(saved.id);
+  assert.ok(healed);
+  assert.equal(healed.missingLocalMedia, true);
+  assert.equal(healed.project.media, null);
+  assert.equal(healed.project.text.content, 'Texto preservado');
+  const resaved = await save({ ...healed.project, name: 'Editado após perda de cache' }, healed.assets, healed.project.revision);
+  assert.equal(resaved.revision, 2);
+  await removeProject();
+});
+
 test('favorites and personal sounds persist and respect local deletion', async () => {
   const { changeFavorite, favoriteIds, keepSound, personalSounds, removeSound } = await import('../src/infrastructure/storage');
   await changeFavorite('pop', true);

@@ -156,7 +156,10 @@ select { appearance: none; background: #fff url("data:image/svg+xml,%3Csvg xmlns
 .empty p { color: var(--muted); }
 .empty .button { margin-top: 4px; }
 .project-list { display: grid; gap: 10px; }
-.project-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 13px; border-radius: 13px; border: 1px solid var(--stone); background: #fff; padding: 14px 16px; }
+.project-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; border-radius: 13px; border: 1px solid var(--stone); background: #fff; padding: 6px 8px 6px 6px; }
+.project-row-main { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 13px; padding: 8px 10px; border-radius: 10px; min-width: 0; text-decoration: none; color: inherit; transition: background-color .16s ease; }
+.project-row-main:hover { background: #f2f6ea; }
+.project-row-copy { min-width: 0; }
 .project-symbol { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 11px; color: #344c2f; background: #eaf0df; }
 .project-row h2 { font-size: 1.1rem; overflow-wrap: anywhere; }
 .project-row time { font-size: .85rem; color: var(--muted); }
@@ -357,7 +360,8 @@ progress { height: 13px; width: 100%; accent-color: #6a923b; }
   input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]), textarea, select { font-size: 16px; }
 }
 @media (max-width: 600px) {
-  .project-row { grid-template-columns: auto minmax(0, 1fr); gap: 10px; }
+  .project-row-main { grid-template-columns: auto minmax(0, 1fr); gap: 10px; }
+  .project-open-pill { grid-column: 1 / -1; justify-self: start; }
 }
 @media (max-width: 470px) {
   .wrap { width: calc(100% - 24px); }
@@ -675,4 +679,14 @@ progress { height: 13px; width: 100%; accent-color: #6a923b; }
 [data-theme="dark"] .wa-compat-badge { background: #263323; color: #cee0c8; }
 [data-theme="dark"] .wa-secondary-exports { border-color: #384636; }
 [data-theme="dark"] .wa-secondary-exports summary { color: #d5e6cd; }
+[data-theme="dark"] .project-row-main:hover { background: #293428; }
+
+.wa-modal-status-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.wa-compat-guide { display: grid; gap: 6px; padding: 12px; border-radius: 12px; background: #f2f6ea; border: 1px solid #d5e2c9; font-size: .84rem; color: #273725; }
+.wa-compat-guide p { line-height: 1.5; }
+[data-theme="dark"] .wa-compat-guide { background: #233022; border-color: #3f523a; color: #dbe7d7; }
+
+@media (max-width: 780px) {
+  .studio-actions .studio-diagnostic, .studio-actions .studio-lang, .studio-actions .studio-wa-config { display: none; }
+}
 

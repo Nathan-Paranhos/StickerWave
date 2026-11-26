@@ -388,11 +388,9 @@ export function SendToWhatsAppModal({
               <RefreshCw size={14} />
               {copy.retry}
             </button>
-            {!botDisabled && (
-              <Link className="button button-small button-outline" href="/whatsapp" onClick={close}>
-                {copy.waSendOpenAdminSetup}
-              </Link>
-            )}
+            <Link className="button button-small button-outline" href="/whatsapp" onClick={close}>
+              {copy.waSendOpenAdminSetup}
+            </Link>
             <button type="button" className="button button-small button-green" onClick={onFallbackLocalExport}>
               {copy.waSendUseLocalExport}
             </button>

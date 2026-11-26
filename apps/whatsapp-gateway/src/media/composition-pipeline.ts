@@ -543,7 +543,9 @@ export class CompositionPipeline {
         targetDurSec.toFixed(3),
         '-c:v',
         vCodec,
-        ...(vCodec === 'libx264' ? ['-preset', 'veryfast', '-crf', '22'] : ['-q:v', '4']),
+        ...(vCodec === 'libx264'
+          ? ['-preset', 'veryfast', '-profile:v', 'baseline', '-level', '3.1', '-crf', '22']
+          : ['-q:v', '4']),
         '-movflags',
         '+faststart',
         mp4OutPath,

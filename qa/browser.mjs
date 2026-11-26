@@ -300,6 +300,20 @@ try {
   await page.getByRole('button', { name: 'Texto', exact: true }).click();
   assert.equal(await page.getByRole('textbox', { name: 'Texto da figurinha' }).inputValue(), 'StickerWave');
   console.log('PASS restoring an original 2.0/P0 archive');
+
+  await page.goto(origin + '/projects');
+  await checkA11y('Projects list accessibility');
+  await page.locator('.project-row-main h2').first().click();
+  await page.waitForURL(/\/studio\/[0-9a-f-]{36}$/);
+  console.log('PASS clicking project row card opens project directly without needing Abrir button only');
+
+  await page.goto(origin);
+  await page.getByRole('link', { name: 'WhatsApp', exact: true }).first().click();
+  await page.waitForURL(/\/whatsapp$/);
+  await page.getByText('Status e Endereço do Gateway WhatsApp').waitFor();
+  await page.getByText(/WhatsApp Web & App Desktop/).waitFor();
+  await checkA11y('Public /whatsapp config view accessibility');
+  console.log('PASS /whatsapp config navigation and cross-client compatibility guide accessible from UI');
   
   await page.goto(origin + '/favorites');
   await page.getByRole('button', { name: 'Minha biblioteca' }).click();

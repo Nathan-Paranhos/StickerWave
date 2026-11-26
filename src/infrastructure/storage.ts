@@ -1,4 +1,4 @@
-import { projectRefs, projectSchema, validateAssets, type Project, type StoredAsset } from '../core/project';
+import { normalizeProjectBounds, projectRefs, projectSchema, sanitizeProjectForAssets, validateAssets, type Project, type StoredAsset } from '../core/project';
 import { apiDeleteProject, apiListFavorites, apiListProjects, apiLoadProject, apiSaveProject, apiSetFavorite, isRemoteAccountMode } from './api';
 
 const databases = new Map<string, Promise<IDBDatabase>>();
@@ -64,29 +64,37 @@ export async function load(id: string): Promise<{ project: Project; assets: Read
   if (remoteActive()) {
     try {
       const fetched = await apiLoadProject(id);
-      if (fetched) remoteProject = projectSchema.parse(fetched);
+      if (fetched) {
+        const parsed = projectSchema.safeParse(fetched);
+        if (parsed.success) remoteProject = parsed.data;
+      }
     } catch (error) {
       if (error instanceof Error && error.message === '7001') throw error;
     }
   }
-  const raw = remoteProject && (!localRaw || remoteProject.revision >= (localRaw.revision ?? 0)) ? remoteProject : localRaw;
-  if (!raw) return null;
-  const project = projectSchema.parse(raw);
+  const candidate = remoteProject && (!localRaw || remoteProject.revision >= (localRaw.revision ?? 0)) ? remoteProject : localRaw;
+  if (!candidate) return null;
+  const parsedProject = projectSchema.safeParse(candidate);
+  if (!parsedProject.success) return null;
+  const project = parsedProject.data;
+
   const assetsTx = (await open()).transaction('assets');
   const assets = await Promise.all(projectRefs(project).map(ref => result<StoredAsset>(assetsTx.objectStore('assets').get(ref))));
   const collection = new Map(assets.filter(Boolean).map(asset => [asset.id, asset]));
-  if (activeUserId && remoteProject && !localRaw && collection.size < projectRefs(project).length) {
-    return { project, assets: collection, missingLocalMedia: true };
+  const { project: healedProject, missingMediaCount } = sanitizeProjectForAssets(project, collection);
+  if (missingMediaCount > 0) {
+    return { project: healedProject, assets: collection, missingLocalMedia: true };
   }
-  validateAssets(project, collection);
-  return { project, assets: collection };
+  validateAssets(healedProject, collection);
+  return { project: healedProject, assets: collection };
 }
 
 export async function listProjects() {
+  let remoteList: Project[] = [];
   if (remoteActive()) {
     try {
       const list = await apiListProjects();
-      return list.flatMap(item => {
+      remoteList = list.flatMap(item => {
         const parsed = projectSchema.safeParse(item);
         return parsed.success ? [parsed.data] : [];
       });
@@ -96,20 +104,32 @@ export async function listProjects() {
   }
   const tx = (await open()).transaction('projects');
   const raw = await result(tx.objectStore('projects').getAll());
-  return raw.flatMap(item => {
+  const localList = raw.flatMap(item => {
     const parsed = projectSchema.safeParse(item);
     return parsed.success ? [parsed.data] : [];
-  }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  });
+  const byId = new Map<string, Project>();
+  for (const item of localList) byId.set(item.id, item);
+  for (const item of remoteList) {
+    const existing = byId.get(item.id);
+    if (!existing || item.revision >= existing.revision) byId.set(item.id, item);
+  }
+  return [...byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export async function save(project: Project, assets: ReadonlyMap<string, StoredAsset>, expectedRevision: number | null) {
-  let next = projectSchema.parse({ ...project, revision: (expectedRevision ?? 0) + 1, updatedAt: new Date().toISOString() });
+  let next = projectSchema.parse({
+    ...normalizeProjectBounds(project, assets),
+    revision: (expectedRevision ?? 0) + 1,
+    updatedAt: new Date().toISOString(),
+  });
   validateAssets(next, assets);
 
   if (remoteActive()) {
     try {
       const savedRemote = await apiSaveProject(next, expectedRevision);
-      next = projectSchema.parse(savedRemote);
+      const parsed = projectSchema.safeParse(savedRemote);
+      if (parsed.success) next = parsed.data;
     } catch (error) {
       if (error instanceof Error && ['4003', '7001', '4002'].includes(error.message)) throw error;
     }
@@ -129,8 +149,8 @@ export async function save(project: Project, assets: ReadonlyMap<string, StoredA
   for (const id of projectRefs(next)) {
     const asset = assets.get(id)!;
     const current = await result<StoredAsset | undefined>(store.get(id));
-    if (!current) store.put(asset);
-    else if (current.sha256 !== asset.sha256) { tx.abort(); throw new Error('4002'); }
+    if (!current || current.sha256 === asset.sha256) store.put(asset);
+    else { tx.abort(); throw new Error('4002'); }
   }
   projects.put(next);
   const all = await result<Project[]>(projects.getAll());

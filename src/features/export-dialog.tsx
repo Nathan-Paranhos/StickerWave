@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Archive, AudioLines, Check, Cloud, Copy, Download, ExternalLink, Film, Image, MessageCircle, Package, Play, Share2, Square, Volume2 } from 'lucide-react';
 import type { AddToWhatsAppResponse, CloudMediaFormat, GatewayCapabilitiesResponse } from '@stickerwave/contracts';
-import { useApp } from '../app/context';
+import { Link, useApp } from '../app/context';
 import { Modal, Notice } from '../app/shared';
 import { imagePngExport, mp4Supported, renderExport, type ExportFormat, type ExportResult } from '../infrastructure/export';
 import { addStickerToWhatsAppViaGateway, convertMediaViaCloudGateway, probeCloudGateway, renderProjectMediaForGateway } from '../infrastructure/gateway';
@@ -335,7 +335,17 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', onO
       : copy.stickerTypeStatic;
 
   return <Modal title={copy.exportTitle} className="export-modal" close={() => operation.current ? operation.current.abort(new Error('3002')) : close()}>
-    {!hasOutput && cloudCaps?.cloudMediaEnabled && <span className="wa-cloud-pill">
+    {!hasOutput && initialFocus === 'whatsapp' && <div className="wa-modal-status-row">
+      {cloudCaps?.cloudMediaEnabled && <span className="wa-cloud-pill">
+        <Cloud size={14} />
+        {copy.waCloudBadge}
+      </span>}
+      <Link className="button button-outline button-small" href="/whatsapp" onClick={close}>
+        <MessageCircle size={14} />
+        {copy.whatsappConfigure}
+      </Link>
+    </div>}
+    {!hasOutput && initialFocus !== 'whatsapp' && cloudCaps?.cloudMediaEnabled && <span className="wa-cloud-pill">
       <Cloud size={14} />
       {copy.waCloudBadge}
     </span>}
@@ -379,14 +389,13 @@ export function ExportDialog({ project, assets, frame, initialFocus = 'all', onO
           onClick={() => void start(whatsappTarget, whatsappTarget === 'video' ? mp4Preferred : '')}>
           <Film size={16} />{sound || animated ? copy.whatsappDirectAction : copy.whatsappWastickersAction}
         </button>
+        <button type="button" className="button button-outline" disabled={progress !== undefined}
+          onClick={() => void start(animated ? 'animated-webp' : 'webp', '')}>
+          <Image size={16} />{copy.downloadWebpExifAction}
+        </button>
         {sound && <button type="button" className="button button-outline" disabled={progress !== undefined}
           onClick={() => void buildWhatsappKit()}>
           <AudioLines size={16} />{copy.whatsappKitAction}
-        </button>}
-        {canClipboardImage && <button type="button" className="button button-outline" disabled={progress !== undefined}
-          onClick={() => void copyFrameForWhatsApp()}>
-          {copiedPng ? <Check size={16} /> : <Copy size={16} />}
-          {copiedPng ? copy.whatsappCopiedImage : copy.whatsappCopyImage}
         </button>}
       </div>
       {copiedPng && sound && <p className="inspector-note">{copy.whatsappCopyFrameNote}</p>}

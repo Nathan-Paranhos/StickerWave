@@ -17,7 +17,7 @@ test('the production build serves deep links, assets, security headers and prote
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const origin = `http://127.0.0.1:${server.address().port}`;
-  for (const route of ['/', '/auth', '/studio', '/studio/00000000-0000-4000-8000-000000000000', '/sounds', '/favorites', '/projects', '/docs', '/privacy', '/licenses', '/contribute', '/about']) {
+  for (const route of ['/', '/auth', '/studio', '/studio/00000000-0000-4000-8000-000000000000', '/sounds', '/favorites', '/projects', '/whatsapp', '/docs', '/privacy', '/licenses', '/contribute', '/about']) {
     const response = await fetch(origin + route);
     assert.equal(response.status, 200);
     assert.match(response.headers.get('content-type'), /text\/html/);

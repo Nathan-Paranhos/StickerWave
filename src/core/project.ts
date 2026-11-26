@@ -159,6 +159,86 @@ export function projectDuration(project: Project, assets: ReadonlyMap<string, As
   const sound = audioTracks(project).map(track => trackDuration(track.style));
   return Math.min(MAX_DURATION, Math.max(0, ...visual, ...sound) || 5000);
 }
+export function normalizeProjectBounds(project: Project, assets: ReadonlyMap<string, Asset>): Project {
+  const visualStyleFor = (assetId: string, style: VisualStyle): VisualStyle => {
+    const asset = assets.get(assetId);
+    if (!asset) return style;
+    const frames = Math.max(1, asset.frames ?? 1);
+    const frame = clamp(style.frame, 0, frames - 1);
+    if (!motion(asset, style) || asset.duration < 100) return { ...style, frame };
+    const end = clamp(style.trim.end, 100, asset.duration);
+    const start = clamp(style.trim.start, 0, Math.max(0, end - 100));
+    return { ...style, frame, trim: { start, end } };
+  };
+  const soundStyleFor = (assetId: string | null, style: SoundStyle): SoundStyle => {
+    const asset = assetId ? assets.get(assetId) : undefined;
+    if (!asset || asset.duration < 100) return style;
+    const end = clamp(style.trim.end, 100, asset.duration);
+    const start = clamp(style.trim.start, 0, Math.max(0, end - 100));
+    return { ...style, trim: { start, end } };
+  };
+  return {
+    ...project,
+    visual: project.media ? visualStyleFor(project.media, project.visual) : project.visual,
+    sound: soundStyleFor(project.audio, project.sound),
+    layers: project.layers.map(layer => layer.kind === 'media' ? { ...layer, style: visualStyleFor(layer.asset, layer.style) } : layer),
+    tracks: project.tracks.map(track => ({ ...track, style: soundStyleFor(track.asset, track.style) })),
+  };
+}
+
+/**
+ * Removes dangling references when local IndexedDB media blobs are absent on this device/browser,
+ * keeping project metadata, captions, shape, and remaining intact assets editable without SW-4002 errors.
+ */
+export function sanitizeProjectForAssets(project: Project, assets: ReadonlyMap<string, Asset>): {
+  project: Project;
+  missingMediaCount: number;
+} {
+  let missingMediaCount = 0;
+  const hasVisual = (id: string | null): id is string => {
+    if (!id) return false;
+    const asset = assets.get(id);
+    return Boolean(asset && !asset.mime.startsWith('audio/'));
+  };
+  const hasAudio = (id: string | null): id is string => {
+    if (!id) return false;
+    const asset = assets.get(id);
+    return Boolean(asset && asset.mime.startsWith('audio/'));
+  };
+
+  for (const id of projectRefs(project)) {
+    if (!assets.has(id)) missingMediaCount++;
+  }
+
+  const visualOptions = project.visualOptions.filter(hasVisual);
+  const media = hasVisual(project.media) ? project.media : (visualOptions[0] ?? null);
+  const layers = project.layers.filter(layer => layer.kind === 'text' || hasVisual(layer.asset));
+  const validLayerIds = new Set(['primary-media', 'primary-text', ...layers.map(l => l.id)]);
+
+  let audio = hasAudio(project.audio) ? project.audio : null;
+  let sound = project.sound;
+  let tracks = project.tracks.filter(track => hasAudio(track.asset));
+  if (!audio && tracks.length > 0) {
+    audio = tracks[0]!.asset;
+    sound = tracks[0]!.style;
+    tracks = tracks.slice(1);
+  }
+
+  const cleaned = normalizeProjectBounds({
+    ...project,
+    media,
+    audio,
+    sound,
+    visualOptions,
+    layers,
+    tracks,
+    order: project.order.filter(id => validLayerIds.has(id)),
+    hidden: project.hidden.filter(id => validLayerIds.has(id)),
+  }, assets);
+
+  return { project: cleaned, missingMediaCount };
+}
+
 export function validateAssets(project: Project, assets: ReadonlyMap<string, Asset>) {
   if (projectRefs(project).some(id => !assets.has(id))) throw new Error('4002');
   if (project.visualOptions.some(id => assets.get(id)?.mime.startsWith('audio/'))) throw new Error('4002');

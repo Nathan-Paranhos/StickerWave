@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AudioLines, BookOpen, CircleHelp, Code2, Download, FileArchive, Folder, FolderOpen, Globe2, ImagePlus,
-  LogOut, Menu, Mic, Plus, ScanLine, ShieldCheck, Sparkles, Trash2, Upload, User, X } from 'lucide-react';
+  LogOut, Menu, MessageCircle, Mic, Plus, ScanLine, ShieldCheck, Sparkles, Trash2, Upload, User, X } from 'lucide-react';
 import { Brand, Modal, Notice } from '../app/shared';
 import { Link, useApp } from '../app/context';
 import { Wavi } from './wavi';
@@ -22,6 +22,7 @@ export function Header() {
       <nav className={`site-nav ${open ? 'nav-open' : ''}`} aria-label={locale === 'pt' ? 'Navegação principal' : 'Main navigation'}>
         <Link href="/sounds" aria-current={path === '/sounds' ? 'page' : undefined}>{copy.sounds}</Link>
         <Link href="/projects" aria-current={path === '/projects' ? 'page' : undefined}>{copy.projects}</Link>
+        <Link href="/whatsapp" aria-current={path === '/whatsapp' ? 'page' : undefined}><MessageCircle size={17} />{copy.whatsappNav}</Link>
         <Link href="/contribute" aria-current={path === '/contribute' ? 'page' : undefined}><Code2 size={17} />{copy.contribute}</Link>
         {!user && <Link className="nav-mobile-auth" href="/auth" aria-current={path === '/auth' ? 'page' : undefined}><User size={16} />{copy.signIn}</Link>}
         {user && <button type="button" className="text-button nav-mobile-auth" onClick={() => void logout()}>{copy.signOut} ({firstName})</button>}
@@ -60,6 +61,7 @@ export function Footer() {
         <div className="button-row footer-preferences"><ThemeControl /></div>
       </div>
       <nav aria-label={copy.about}>
+        <Link href="/whatsapp">{copy.whatsappConfigure}</Link>
         {(['docs', 'privacy', 'licenses', 'contribute', 'about'] as const).map(item => <Link key={item} href={`/${item}`}>{copy[item]}</Link>)}
       </nav>
     </div>
@@ -157,10 +159,15 @@ export function ProjectsPage() {
     {projects?.length === 0 && <div className="empty project-empty"><Folder size={34} /><h2>{copy.emptyProjects}</h2><p>{copy.emptyProjectsBody}</p></div>}
     {!!projects?.length && <>
       <div className="project-list">{projects.map(project => <article key={project.id} className="project-row">
-        <div className="project-symbol"><Folder size={23} /></div>
-        <div><h2>{project.name}</h2><time dateTime={project.updatedAt}>{new Intl.DateTimeFormat(locale === 'pt' ? 'pt-BR' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(project.updatedAt))}</time></div>
-        <Link className="button button-outline button-small" href={`/studio/${project.id}`}>{copy.open}</Link>
-        <button className="icon-button" aria-label={`${copy.delete} ${project.name}`} onClick={() => setPending(project.id)}><Trash2 size={18} /></button>
+        <Link className="project-row-main" href={`/studio/${project.id}`}>
+          <div className="project-symbol"><Folder size={23} /></div>
+          <div className="project-row-copy">
+            <h2>{project.name}</h2>
+            <time dateTime={project.updatedAt}>{new Intl.DateTimeFormat(locale === 'pt' ? 'pt-BR' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(project.updatedAt))}</time>
+          </div>
+          <span className="button button-outline button-small project-open-pill">{copy.open}</span>
+        </Link>
+        <button type="button" className="icon-button" aria-label={`${copy.delete} ${project.name}`} onClick={() => setPending(project.id)}><Trash2 size={18} /></button>
       </article>)}</div>
       <button className="button button-outline danger delete-all" onClick={() => setPending('all')}><Trash2 size={17} />{copy.deleteAll}</button>
     </>}

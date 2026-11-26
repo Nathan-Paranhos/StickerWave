@@ -1,6 +1,6 @@
 import { Unzip, UnzipInflate, strFromU8, strToU8, zipSync } from 'fflate';
 import { z } from 'zod';
-import { assetSchema, projectRefs, projectSchema, validateAssets, type Project, type StoredAsset } from '../core/project';
+import { assetSchema, normalizeProjectBounds, projectRefs, projectSchema, validateAssets, type Project, type StoredAsset } from '../core/project';
 import { hash, importMedia } from './media';
 import { imageExport } from './export';
 
@@ -121,9 +121,10 @@ export async function readBackup(file: Blob, signal: AbortSignal) {
     if (await hash(blob) !== asset.sha256) throw new Error('4002');
     const verified = await importMedia(blob, asset.name, asset.mime.startsWith('audio/') ? 'audio' : 'visual', signal);
     if (verified.mime !== asset.mime || verified.width !== asset.width || verified.height !== asset.height ||
-      Math.abs(verified.duration - asset.duration) > 50 || (asset.frames ?? 1) !== (verified.frames ?? 1)) throw new Error('4002');
+      Math.abs(verified.duration - asset.duration) > 500 || (asset.frames ?? 1) !== (verified.frames ?? 1)) throw new Error('4002');
     assets.set(asset.id, { ...asset, ...verified, id: asset.id });
   }
-  validateAssets(project, assets);
-  return { project, assets };
+  const normalized = normalizeProjectBounds(project, assets);
+  validateAssets(normalized, assets);
+  return { project: normalized, assets };
 }

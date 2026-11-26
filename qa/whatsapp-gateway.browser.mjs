@@ -102,8 +102,10 @@ try {
     );
   }
 
-  // 1) Protected /whatsapp admin gate + live SSE QR pairing + Accessibility
+  // 1) Protected /whatsapp admin gate + live public status card + SSE QR pairing + Accessibility
   await page.goto(`${origin}/whatsapp`);
+  await page.getByText('Status e Endereço do Gateway WhatsApp').waitFor();
+  await page.getByText(/OK \(WebP \+ Opus \+ MP4\)/).waitFor();
   await page.getByPlaceholder('GATEWAY_ADMIN_SECRET').fill('wrong-secret');
   await page.getByRole('button', { name: /Acessar painel WhatsApp/i }).click();
   await page.getByText(/Autenticação administrativa obrigatória|Segredo administrativo inválido/i).waitFor();
