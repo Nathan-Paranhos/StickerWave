@@ -243,14 +243,15 @@ try {
     await page.getByRole('button', { name: 'Criar conta grátis' }).last().click();
 
     await page.getByRole('button', { name: 'Editar um exemplo' }).click();
-    const cloudBtn = page.getByRole('button', { name: /Exportar p\/ WhatsApp \(Cloud\)/i }).first();
-    await cloudBtn.waitFor();
+    await page.getByRole('button', { name: /Prévia WhatsApp/i }).waitFor();
+    const cloudBtn = page.locator('.wa-send-header-btn');
+    await cloudBtn.getByText(/Mandar no WhatsApp/i).waitFor();
     await cloudBtn.click();
 
     const exportModal = page.getByRole('dialog', { name: 'Exportar criação' });
     await exportModal.waitFor();
-    await exportModal.getByText(/Cloud FFmpeg ativo/i).waitFor();
-    await exportModal.getByRole('button', { name: /Pacote \.wastickers/i }).click();
+    await exportModal.getByText(/Processamento rápido na nuvem ativo/i).waitFor();
+    await exportModal.getByRole('button', { name: /Baixar pacote \(\.wastickers\)/i }).click();
     await exportModal.getByText(/Arquivo pronto/i).waitFor({ timeout: 45000 });
     await exportModal.getByRole('link', { name: /Baixar arquivo/i }).waitFor();
     assert.equal(cloudConvertCalled, true);

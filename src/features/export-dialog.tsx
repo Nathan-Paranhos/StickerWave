@@ -9,7 +9,13 @@ import { videoFormats } from '../infrastructure/media';
 import { audioTracks, motion, projectDuration, visualLayers, type Project, type StoredAsset } from '../core/project';
 import { errorCode, type ErrorCode } from '../locales';
 
-type Props = { project: Project; assets: ReadonlyMap<string, StoredAsset>; frame: number; close: () => void };
+type Props = {
+  project: Project;
+  assets: ReadonlyMap<string, StoredAsset>;
+  frame: number;
+  initialFocus?: 'whatsapp' | 'all';
+  close: () => void;
+};
 type KitResult = { imageUrl: string; imageFile: File; audioUrl: string; audioFile: File };
 const mimeVideo = (format: string) => format.startsWith('video/mp4') ? 'MP4' : 'WebM';
 
@@ -17,7 +23,7 @@ function safeBasename(name: string) {
   return name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').replace(/^[. ]+|[. ]+$/g, '').slice(0, 65) || 'stickerwave';
 }
 
-export function ExportDialog({ project, assets, frame, close }: Props) {
+export function ExportDialog({ project, assets, frame, initialFocus = 'all', close }: Props) {
   const { copy } = useApp();
   const layers = visualLayers(project).filter(layer => !project.hidden.includes(layer.id));
   const visual = layers.length > 0;
@@ -43,7 +49,7 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
   const [kit, setKit] = useState<KitResult>();
   const [container, setContainer] = useState(mp4Preferred);
   const [cloudCaps, setCloudCaps] = useState<GatewayCapabilitiesResponse | null>(null);
-  const [useCloud, setUseCloud] = useState(true);
+  const [showAllFormats, setShowAllFormats] = useState(initialFocus !== 'whatsapp' || !whatsappTarget);
   const operation = useRef<AbortController | null>(null);
   const objectUrls = useRef<string[]>([]);
   const mounted = useRef(true);
@@ -101,7 +107,7 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
     setFailure(undefined);
     setProgress(0);
     try {
-      const cloudFormat = useCloud && cloudCaps?.cloudMediaEnabled ? mapToCloudFormat(chosenFormat, chosenContainer) : null;
+      const cloudFormat = cloudCaps?.cloudMediaEnabled ? mapToCloudFormat(chosenFormat, chosenContainer) : null;
       let rendered: ExportResult | null = null;
 
       if (cloudFormat && cloudCaps?.cloudFormats?.includes(cloudFormat)) {
@@ -210,6 +216,11 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
   const hasOutput = Boolean(result || kit);
 
   return <Modal title={copy.exportTitle} className="export-modal" close={() => operation.current ? operation.current.abort(new Error('3002')) : close()}>
+    {!hasOutput && cloudCaps?.cloudMediaEnabled && <span className="wa-cloud-pill">
+      <Cloud size={14} />
+      {copy.waCloudBadge}
+    </span>}
+
     {!hasOutput && whatsappTarget && <div className="whatsapp-direct-box">
       <div className="whatsapp-direct-copy">
         <strong><MessageCircle size={17} />{copy.whatsappDirectTitle}</strong>
@@ -218,38 +229,37 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
       <div className="whatsapp-direct-actions">
         <button type="button" className="button button-green" disabled={progress !== undefined}
           onClick={() => void start(whatsappTarget, whatsappTarget === 'video' ? mp4Preferred : '')}>
-          <MessageCircle size={17} />{copy.whatsappDirectAction}
+          <MessageCircle size={17} />{sound || animated ? copy.whatsappDirectAction : copy.whatsappWastickersAction}
+        </button>
+        <button type="button" className="button button-outline" disabled={progress !== undefined}
+          onClick={() => void start('wastickers', '')}>
+          <Package size={16} />{copy.whatsappWastickersAction}
         </button>
         {sound && <button type="button" className="button button-outline" disabled={progress !== undefined}
           onClick={() => void buildWhatsappKit()}>
           <AudioLines size={16} />{copy.whatsappKitAction}
         </button>}
-        <button type="button" className="button button-outline" disabled={progress !== undefined}
-          onClick={() => void start('wastickers', '')}>
-          <Package size={16} />{copy.whatsappWastickersAction}
-        </button>
+        {canClipboardImage && <button type="button" className="button button-outline" disabled={progress !== undefined}
+          onClick={() => void copyFrameForWhatsApp()}>
+          {copiedPng ? <Check size={16} /> : <Copy size={16} />}
+          {copiedPng ? copy.whatsappCopiedImage : copy.whatsappCopyImage}
+        </button>}
       </div>
+      {copiedPng && sound && <p className="inspector-note">{copy.whatsappCopyFrameNote}</p>}
     </div>}
 
-    {!hasOutput && cloudCaps?.cloudMediaEnabled && <div className="whatsapp-direct-box">
-      <div className="whatsapp-direct-copy">
-        <strong><Cloud size={17} />{copy.waCloudBadge}</strong>
-        <p>{copy.waCloudExportHint}</p>
-        <label className="checkbox-row" style={{ marginTop: 8 }}>
-          <input type="checkbox" checked={useCloud} disabled={progress !== undefined} onChange={e => setUseCloud(e.target.checked)} />
-          <span>{copy.waCloudToggle}</span>
-        </label>
-      </div>
-    </div>}
+    {!hasOutput && whatsappTarget && <button type="button" className="text-button" onClick={() => setShowAllFormats(v => !v)}>
+      {showAllFormats ? copy.whatsappHideAllFormats : copy.whatsappShowAllFormats}
+    </button>}
 
-    {!hasOutput && <fieldset className="format-options">
+    {!hasOutput && showAllFormats && <fieldset className="format-options">
       <legend>{copy.format}</legend>
       {options.map(({ id, Icon, title, info, disabled }) => <label key={id} className={`format-option ${format === id ? 'format-selected' : ''}`}>
         <input type="radio" name="format" value={id} checked={format === id} disabled={disabled || progress !== undefined} onChange={() => setFormat(id)} />
         <Icon size={21} /><span><strong>{title}</strong><small>{info}</small></span>
       </label>)}
     </fieldset>}
-    {!hasOutput && format === 'video' && !!containers.length && <><div className="segmented format-containers">
+    {!hasOutput && showAllFormats && format === 'video' && !!containers.length && <><div className="segmented format-containers">
       {containers.map(item => <button key={item} disabled={progress !== undefined} aria-pressed={container === item} onClick={() => setContainer(item)}>{mimeVideo(item)}</button>)}
     </div><p className="inspector-note">{copy.native}</p></>}
     {failure && <Notice error={failure !== '3002'}>{copy.errors[failure]} [SW-{failure}]</Notice>}
@@ -260,49 +270,36 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
       <p>{kit.imageFile.name} · {(kit.imageFile.size / 1024).toFixed(1)} KB + {kit.audioFile.name} · {(kit.audioFile.size / 1024).toFixed(1)} KB</p>
       <img src={kit.imageUrl} width="128" height="128" alt={copy.preview} />
       <div className="button-row">
-        <a className="button button-green" href={kit.imageUrl} download={kit.imageFile.name}><Download size={17} />{copy.whatsappKitDownloadImg}</a>
-        <a className="button button-green" href={kit.audioUrl} download={kit.audioFile.name}><Download size={17} />{copy.whatsappKitDownloadAudio}</a>
-        {kitShareable && <button type="button" className="button button-outline" onClick={() => void shareFiles([kit.imageFile, kit.audioFile])}>
+        {kitShareable && <button type="button" className="button button-green" onClick={() => void shareFiles([kit.imageFile, kit.audioFile])}>
           <Share2 size={17} />{copy.whatsappKitShareBoth}
         </button>}
+        <a className={kitShareable ? 'button button-outline' : 'button button-green'} href={kit.imageUrl} download={kit.imageFile.name}><Download size={17} />{copy.whatsappKitDownloadImg}</a>
+        <a className={kitShareable ? 'button button-outline' : 'button button-green'} href={kit.audioUrl} download={kit.audioFile.name}><Download size={17} />{copy.whatsappKitDownloadAudio}</a>
         <a className="button button-outline" href="https://api.whatsapp.com/send" target="_blank" rel="noopener noreferrer">
           <ExternalLink size={16} />{copy.whatsappOpenApp}
         </a>
-        {!isMobile && <a className="button button-outline" href="https://web.whatsapp.com" target="_blank" rel="noopener noreferrer">
-          <ExternalLink size={16} />{copy.whatsappOpenWeb}
-        </a>}
-        {canClipboardImage && <button type="button" className="button button-outline" onClick={() => void copyFrameForWhatsApp()}>
-          {copiedPng ? <Check size={16} /> : <Copy size={16} />}
-          {copiedPng ? copy.whatsappCopiedImage : copy.whatsappCopyImage}
-        </button>}
       </div>
-      <div className="whatsapp-guide">
-        <strong>{copy.whatsappStepsTitle}</strong>
-        <p>{copy.whatsappStep1}</p>
-        <p>{copy.whatsappStep2}</p>
-        <p>{copy.whatsappStep3}</p>
-      </div>
+      <details className="whatsapp-guide-details">
+        <summary>{copy.whatsappQuickTipsToggle}</summary>
+        <div className="whatsapp-guide">
+          <p>{copy.whatsappStep1}</p>
+          <p>{copy.whatsappStep2}</p>
+          <p>{copy.whatsappStep3}</p>
+        </div>
+      </details>
       <button className="text-button" onClick={() => setKit(undefined)}>{copy.format}</button>
     </div>}
 
     {result && <div className="export-result" role="status"><h3>{copy.exportDone}</h3><p>{result.file.name} · {(result.blob.size / 1024).toFixed(1)} KB</p>
       {(result.extension === 'webp' || result.extension === 'png') && <img src={result.url} width="128" height="128" alt={copy.preview} />}
+      {result.extension === 'mp4' && <video className="export-video-preview" src={result.url} width="200" height="200" controls playsInline loop />}
       {result.exportedFormat === 'webp' && result.extension === 'webp' && result.blob.size > 100 * 1024 && <p>{copy.sizeWarning}</p>}
       {result.exportedFormat === 'video' && sound && totalDuration > 5000 && <Notice>{copy.whatsappDurationNote}</Notice>}
       <div className="button-row">
-        <a className="button button-green" href={result.url} download={result.file.name}><Download size={18} />{copy.download}</a>
-        {shareable && <button type="button" className="button button-outline" onClick={() => void shareFiles([result.file])}>
+        {shareable && <button type="button" className="button button-green" onClick={() => void shareFiles([result.file])}>
           <Share2 size={17} />{copy.whatsappSendDirect}
         </button>}
-        {isWhatsappMedia && visual && sound && <button type="button" className="button button-outline" disabled={progress !== undefined} onClick={() => void buildWhatsappKit()}>
-          <AudioLines size={16} />{copy.whatsappKitAction}
-        </button>}
-        {isWhatsappMedia && result.exportedFormat !== 'wastickers' && <button type="button" className="button button-outline" disabled={progress !== undefined} onClick={() => void start('wastickers', '')}>
-          <Package size={16} />{copy.whatsappWastickersAction}
-        </button>}
-        {isWhatsappMedia && <a className="button button-outline" href="https://api.whatsapp.com/send" target="_blank" rel="noopener noreferrer">
-          <ExternalLink size={16} />{copy.whatsappOpenApp}
-        </a>}
+        <a className={shareable ? 'button button-outline' : 'button button-green'} href={result.url} download={result.file.name}><Download size={18} />{copy.download}</a>
         {isWhatsappMedia && !isMobile && <a className="button button-outline" href="https://web.whatsapp.com" target="_blank" rel="noopener noreferrer">
           <ExternalLink size={16} />{copy.whatsappOpenWeb}
         </a>}
@@ -311,20 +308,21 @@ export function ExportDialog({ project, assets, frame, close }: Props) {
           {copiedPng ? copy.whatsappCopiedImage : copy.whatsappCopyImage}
         </button>}
       </div>
-      {isWhatsappMedia && <div className="whatsapp-guide">
-        <strong>{copy.whatsappStepsTitle}</strong>
-        <p>{copy.whatsappStep1}</p>
-        <p>{copy.whatsappStep2}</p>
-        <p>{copy.whatsappStep3}</p>
-        {sound && result.exportedFormat !== 'video' && <p>{copy.whatsappCopyFrameNote}</p>}
-      </div>}
+      {isWhatsappMedia && <details className="whatsapp-guide-details">
+        <summary>{copy.whatsappQuickTipsToggle}</summary>
+        <div className="whatsapp-guide">
+          <p>{copy.whatsappStep1}</p>
+          <p>{copy.whatsappStep2}</p>
+          <p>{copy.whatsappStep3}</p>
+        </div>
+      </details>}
       <button className="text-button" onClick={() => setResult(undefined)}>{copy.format}</button>
     </div>}
 
     {!hasOutput && <div className="button-row modal-actions">
       {progress !== undefined ? <button className="button button-outline" onClick={() => operation.current?.abort(new Error('3002'))}>{copy.cancelExport}</button>
         : <><button className="button button-outline" onClick={close}>{copy.cancel}</button>
-          <button className="button button-green" disabled={options.find(option => option.id === format)?.disabled} onClick={() => void start()}><Download size={18} />{copy.export}</button></>}
+          {showAllFormats && <button className="button button-green" disabled={options.find(option => option.id === format)?.disabled} onClick={() => void start()}><Download size={18} />{copy.export}</button>}</>}
     </div>}
   </Modal>;
 }

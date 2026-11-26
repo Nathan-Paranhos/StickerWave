@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from 'react';
-import { AudioLines, CloudDownload, Download, FolderOpen, Globe2, ImagePlus, Layers, LoaderCircle, LogOut, Play, Redo2, Send, Sparkles, Square, Undo2, Upload, Volume2, VolumeX, WifiOff, Wrench, Type } from 'lucide-react';
+import { AudioLines, CheckCircle2, CloudDownload, Download, FolderOpen, Globe2, ImagePlus, Layers, LoaderCircle, LogOut, Play, Redo2, Send, Sparkles, Square, Undo2, Upload, Volume2, VolumeX, WifiOff, Wrench, Type } from 'lucide-react';
 import { Link, useApp } from '../app/context';
 import { Bars, Modal, Notice } from '../app/shared';
 import { audioTracks, clamp, createProject, initialSound, initialVisual, motion, newTrim, projectRefs, trackDuration, updateTrim, visualLayers, MAX_DURATION, MAX_LAYERS, MAX_TRACKS, type Project, type StoredAsset, type Trim } from '../core/project';
@@ -56,6 +56,7 @@ function Editor({ session, query }: { session: Session; query: string }) {
   const [library, setLibrary] = useState(false);
   const [activeTrack, setActiveTrack] = useState('primary-audio');
   const [exporting, setExporting] = useState(false);
+  const [exportFocus, setExportFocus] = useState<'whatsapp' | 'all'>('all');
   const [sendingWa, setSendingWa] = useState(false);
   const [gwCaps, setGwCaps] = useState<GatewayCapabilitiesResponse | null>(null);
   const [diagnostics, setDiagnostics] = useState(false);
@@ -395,8 +396,8 @@ function Editor({ session, query }: { session: Session; query: string }) {
         <button className="icon-button studio-diagnostic" title={copy.diagnostic} aria-label={copy.diagnostic} onClick={() => setDiagnostics(true)}><Wrench size={17} /></button>
         <button className="language studio-lang" aria-label={`${locale.toUpperCase()} · ${copy.language}`} onClick={toggleLanguage}><Globe2 size={16} />{locale === 'pt' ? 'PT' : 'EN'}</button>
         <button className="icon-button studio-logout" title={copy.signOut} aria-label={copy.signOut} onClick={() => void draft.drain().then(() => logout())}><LogOut size={17} /></button>
-        <button className="button button-outline wa-send-header-btn" aria-label={gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled ? copy.waCloudWhatsAppAction : copy.waSendButton} title={gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled ? copy.waCloudWhatsAppAction : copy.waSendButton} onClick={() => { preview.halt(); if (gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled) setExporting(true); else setSendingWa(true); }} disabled={!haveComposition || Boolean(job)}><Send size={17} /><span>{gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled ? copy.waCloudWhatsAppAction : copy.waSendButton}</span></button>
-        <button className="button button-green export-button" onClick={() => { preview.halt(); setExporting(true); }} disabled={!haveComposition || Boolean(job)}><Download size={18} />{copy.export}</button>
+        <button className="button button-outline wa-send-header-btn" aria-label={gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled ? copy.waCloudWhatsAppAction : copy.waSendButton} title={gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled ? copy.waCloudWhatsAppAction : copy.waSendButton} onClick={() => { preview.halt(); if (gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled) { setExportFocus('whatsapp'); setExporting(true); } else setSendingWa(true); }} disabled={!haveComposition || Boolean(job)}><Send size={17} /><span>{gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled ? copy.waCloudWhatsAppAction : copy.waSendButton}</span></button>
+        <button className="button button-green export-button" onClick={() => { preview.halt(); setExportFocus('all'); setExporting(true); }} disabled={!haveComposition || Boolean(job)}><Download size={18} />{copy.export}</button>
       </div>
     </header>
     {(reportCode || message || job === 'loading') && <div className="studio-notices">
@@ -448,6 +449,25 @@ function Editor({ session, query }: { session: Session; query: string }) {
             <span>512 × 512</span>
           </div>
         </header>
+        <div className="studio-stepper" role="group" aria-label={copy.stepsTitle}>
+          <button type="button" className={`studio-step ${layers.length > 0 ? 'done' : ''}`} disabled={Boolean(job)} onClick={() => mediaInput.current?.click()}>
+            {layers.length > 0 && <CheckCircle2 size={14} />}
+            <span>{copy.studioStep1}</span>
+          </button>
+          <button type="button" className={`studio-step ${tracks.length > 0 ? 'done' : ''}`} disabled={Boolean(job)} onClick={() => { preview.halt(); setLibrary(true); }}>
+            {tracks.length > 0 && <CheckCircle2 size={14} />}
+            <span>{copy.studioStep2}</span>
+          </button>
+          <button type="button" className="studio-step cta" disabled={!haveComposition || Boolean(job)} onClick={() => {
+            preview.halt();
+            if (gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled) { setExportFocus('whatsapp'); setExporting(true); }
+            else if (gwCaps?.whatsappBotEnabled) setSendingWa(true);
+            else { setExportFocus('whatsapp'); setExporting(true); }
+          }}>
+            <Send size={13} />
+            <span>{copy.studioStep3}</span>
+          </button>
+        </div>
         <div className={`stage ${previewMode === 'whatsapp' && haveComposition ? 'whatsapp-stage' : ''}`}>
           <div className={previewMode === 'whatsapp' && haveComposition ? 'whatsapp-bubble' : 'stage-slot'}>
             <div className={`canvas-frame ${selectedVisual && previewMode === 'studio' ? 'pannable' : ''} ${previewMode === 'whatsapp' ? 'whatsapp-sticker-frame' : ''}`}>
@@ -474,18 +494,18 @@ function Editor({ session, query }: { session: Session; query: string }) {
               {layers.some(l => l.kind === 'text' && !project.hidden.includes(l.id)) && <p className="sr-only">{copy.readText}. {layers.flatMap(l => l.kind === 'text' && !project.hidden.includes(l.id) ? [l.style.content] : []).join('. ')}</p>}
               {!layers.length && <div className="drop-card">
                 <div className="drop-icon"><ImagePlus size={27} /></div>
-                <h2>{copy.addMedia}</h2><p>{copy.drop}</p>
-                <button className="button button-green" disabled={Boolean(job)} onClick={() => mediaInput.current?.click()}><Upload size={17} />{copy.addMedia}</button>
+                <h2>{copy.studioEmptyTitle}</h2><p>{copy.studioEmptyBody}</p>
+                <div className="drop-actions">
+                  <button className="button button-green" disabled={Boolean(job)} onClick={() => mediaInput.current?.click()}><Upload size={17} />{copy.addMedia}</button>
+                  <button className="button button-outline" disabled={Boolean(job)} onClick={() => { preview.halt(); setLibrary(true); }}><AudioLines size={17} />{copy.studioChooseSound}</button>
+                </div>
                 <button className="text-button example-button" disabled={Boolean(job)} onClick={demo}><Sparkles size={14} />{exampleLabel}</button>
               </div>}
             </div>
             {previewMode === 'whatsapp' && haveComposition && <div className="whatsapp-bubble-meta">
               <span>{copy.tapToPlaySticker}</span>
-              <button type="button" className="button button-green button-small" onClick={() => { preview.halt(); if (gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled) setExporting(true); else setSendingWa(true); }}>
+              <button type="button" className="button button-green button-small" onClick={() => { preview.halt(); if (gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled) { setExportFocus('whatsapp'); setExporting(true); } else setSendingWa(true); }}>
                 <Send size={15} />{gwCaps?.cloudMediaEnabled && !gwCaps.whatsappBotEnabled ? copy.waCloudWhatsAppAction : copy.waSendButton}
-              </button>
-              <button type="button" className="button button-outline button-small" onClick={() => { preview.halt(); setExporting(true); }}>
-                <Download size={15} />{copy.whatsappDirectAction}
               </button>
             </div>}
           </div>
@@ -561,8 +581,8 @@ function Editor({ session, query }: { session: Session; query: string }) {
       </section>
     </div>
     {library && <Modal title={copy.catalogTitle} close={() => setLibrary(false)} className="library-modal"><SoundLibrary select={sound => void choose(sound)} /></Modal>}
-    {exporting && <ExportDialog project={project} assets={assets} frame={preview.position} close={() => setExporting(false)} />}
-    {sendingWa && <SendToWhatsAppModal project={project} assets={assets} close={() => setSendingWa(false)} onFallbackLocalExport={() => { setSendingWa(false); setExporting(true); }} />}
+    {exporting && <ExportDialog project={project} assets={assets} frame={preview.position} initialFocus={exportFocus} close={() => setExporting(false)} />}
+    {sendingWa && <SendToWhatsAppModal project={project} assets={assets} close={() => setSendingWa(false)} onFallbackLocalExport={() => { setSendingWa(false); setExportFocus('whatsapp'); setExporting(true); }} />}
     {diagnostics && <Modal title={copy.diagnostic} close={() => setDiagnostics(false)}>
       <p>{copy.noUpload}</p>
       <dl className="capabilities">{Object.entries(capabilities()).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ? copy.supported : copy.unavailable}</dd></div>)}</dl>

@@ -203,9 +203,9 @@ select { appearance: none; background: #fff url("data:image/svg+xml,%3Csvg xmlns
 .workspace-preview > header { display: flex; align-items: center; justify-content: space-between; min-height: 42px; padding: 0 clamp(12px,2vw,24px); color: #445342; font-size: .81rem; font-weight: 800; }
 .workspace-preview > header > span:first-child { display: flex; align-items: center; gap: 7px; }
 .preview-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #789653; }
-.stage { display: grid; place-items: center; flex: 1; padding: 4px 18px 18px; min-height: 0; }
+.stage { display: grid; place-items: center; flex: 1; padding: 6px 18px 18px; min-height: 0; overflow: hidden; }
 .canvas-frame {
-  position: relative; width: min(100%, 512px, calc(100dvh - 354px)); min-width: min(300px, 100%); aspect-ratio: 1;
+  position: relative; width: min(100%, 512px, calc(100dvh - 404px)); min-width: min(260px, 100%); aspect-ratio: 1;
   border: 1px solid #cbd5c6; border-radius: 12px; overflow: hidden; box-shadow: 0 8px 22px #2f492016;
   background: repeating-conic-gradient(#e8ede4 0% 25%, #f7f9f5 0% 50%) 50% / 24px 24px;
 }
@@ -550,12 +550,24 @@ progress { height: 13px; width: 100%; accent-color: #6a923b; }
 .password-wrap input { width: 100%; padding-right: 46px; }
 .password-eye { position: absolute; right: 4px; display: inline-grid; place-items: center; width: 38px; height: 38px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); }
 .password-eye:hover { background: #e9ede2; color: var(--carbon); }
-.whatsapp-direct-box { display: grid; gap: 10px; padding: 12px 14px; border-radius: 14px; background: #edf6db; border: 1px solid #cce0a4; margin-bottom: 14px; }
-.whatsapp-direct-copy { display: grid; gap: 3px; }
-.whatsapp-direct-copy strong { display: inline-flex; align-items: center; gap: 6px; font-size: .95rem; color: #1c2e14; }
-.whatsapp-direct-copy p { font-size: .82rem; color: #364a2b; line-height: 1.45; }
-.whatsapp-direct-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-@media (max-width: 520px) { .whatsapp-direct-actions .button, .export-result .button-row .button { width: 100%; } }
+.whatsapp-direct-box { display: grid; gap: 12px; padding: 14px 16px; border-radius: 16px; background: #edf6db; border: 1px solid #cce0a4; margin-bottom: 14px; }
+.whatsapp-direct-copy { display: grid; gap: 4px; }
+.whatsapp-direct-copy strong { display: inline-flex; align-items: center; gap: 7px; font-size: 1rem; color: #1c2e14; }
+.whatsapp-direct-copy p { font-size: .84rem; color: #364a2b; line-height: 1.45; }
+.whatsapp-direct-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.whatsapp-direct-actions .button:first-child { grid-column: 1 / -1; justify-content: center; min-height: 46px; font-size: .95rem; }
+@media (max-width: 520px) { .whatsapp-direct-actions { grid-template-columns: 1fr; } .whatsapp-direct-actions .button, .export-result .button-row .button { width: 100%; } }
+.wa-cloud-pill { display: inline-flex; align-items: center; gap: 6px; justify-self: start; padding: 4px 10px; border-radius: 999px; background: #e3f4ca; color: #244510; font-size: .78rem; font-weight: 800; margin-bottom: 10px; }
+.whatsapp-guide-details { width: 100%; text-align: left; padding: 10px 12px; border-radius: 12px; background: #f4f7ee; border: 1px solid #d4e2bc; font-size: .84rem; color: #26361d; }
+.whatsapp-guide-details summary { cursor: pointer; font-weight: 800; color: #1f3314; }
+.whatsapp-guide-details .whatsapp-guide { margin-top: 8px; display: grid; gap: 6px; }
+.export-video-preview { border-radius: 14px; background: #0f140f; max-width: 100%; }
+.studio-stepper { display: flex; flex-wrap: wrap; flex: 0 0 auto; gap: 8px; padding: 6px clamp(12px, 2vw, 24px) 4px; }
+.studio-step { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 5px 12px; border-radius: 999px; border: 1px solid #cfd6c9; background: #f8faf5; color: #2b3829; font-size: .8rem; font-weight: 750; cursor: pointer; }
+.studio-step.done { background: #e3f4ca; border-color: #9ec95f; color: #203d0f; }
+.studio-step.cta { background: #1d2b16; border-color: #1d2b16; color: #f4fbe8; }
+.studio-step:disabled { opacity: .48; cursor: not-allowed; }
+.drop-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
 .auth-note { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 12px; background: #f2f6ea; border: 1px solid #d9e5c5; font-size: .82rem; color: #2f4225; line-height: 1.45; }
 .auth-switch { justify-self: center; }
 [data-theme="dark"] .auth-card { background: #202620; border-color: var(--stone); }
@@ -569,6 +581,12 @@ progress { height: 13px; width: 100%; accent-color: #6a923b; }
 [data-theme="dark"] .whatsapp-direct-box { background: #253420; border-color: #46613a; }
 [data-theme="dark"] .whatsapp-direct-copy strong { color: #eef7df; }
 [data-theme="dark"] .whatsapp-direct-copy p { color: #cbdabf; }
+[data-theme="dark"] .wa-cloud-pill { background: #2b451c; color: #d5f2a2; }
+[data-theme="dark"] .whatsapp-guide-details { background: #222b20; border-color: #3d5038; color: #dce8d7; }
+[data-theme="dark"] .whatsapp-guide-details summary { color: #eef7df; }
+[data-theme="dark"] .studio-step { background: #212820; border-color: #3f4b3d; color: #dce8d7; }
+[data-theme="dark"] .studio-step.done { background: #2b451c; border-color: #5b8736; color: #e2f6bd; }
+[data-theme="dark"] .studio-step.cta { background: #9bd63c; border-color: #9bd63c; color: #16220e; }
 [data-theme="dark"] .nav-mobile-auth { color: #d8ead1; }
 
 .spin { animation: sw-spin 1s linear infinite; }
